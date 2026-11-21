@@ -34,9 +34,9 @@ export const OUTPUT_CONTRACT = `Reply with a single JSON object, no prose, no ma
       "end_line": 14,
       "severity": "CRITICAL" | "WARNING" | "SUGGESTION",
       "category": "security" | "correctness" | "performance" | "spec" | "maintainability",
-      "title": "one short sentence naming the defect",
-      "rationale": "why this is wrong, quoting the code and the path that makes it reachable",
-      "suggestion": "the smallest fix, as a short code snippet or one sentence. \\"\\" when there is none"
+      "title": "one short sentence naming the defect, in plain language",
+      "rationale": "1-2 sentences a busy reviewer reads once: what breaks, for whom, and why this code makes it happen. No restating the diff, no bullet lists, no jargon.",
+      "suggestion": "the smallest concrete fix: one sentence, or a short snippet. \"\" when there is none"
     }
   ]
 }

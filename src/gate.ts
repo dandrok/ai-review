@@ -12,26 +12,9 @@ export function countBlockers(findings: Finding[], failOn: FailOn): number {
   return findings.filter((f) => (RANK[f.severity] ?? 0) >= MIN[failOn]).length;
 }
 
-export function agentPrompt(f: Finding): string {
-  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
-  const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim();
-  return [
-    `Fix this code review finding.`,
-    ``,
-    `severity: ${f.severity.toLowerCase()}`,
-    `category: ${f.category}`,
-    `location: ${range}`,
-    `problem: ${f.title}`,
-    `why: ${oneLine(f.rationale)}`,
-    f.suggestion ? `suggested fix: ${oneLine(f.suggestion)}` : '',
-    `id: ${f.id}`,
-    ``,
-    `Re-read the surrounding code before editing, change the smallest thing that fixes the`,
-    `root cause, and do not touch anything unrelated.`,
-  ]
-    .filter((l) => l !== '')
-    .join('\n');
-}
+const range = (f: Finding) => (f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`);
+const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim();
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 function payloadFor(f: Finding): string {
   return JSON.stringify({
@@ -45,54 +28,87 @@ function payloadFor(f: Finding): string {
   });
 }
 
-/** Collapsed by default so a review reads as a list; GitHub puts a copy button on the fence. */
-export function detailsBlock(f: Finding, agent: string, open = false): string {
-  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
-  return [
-    `<details${open ? ' open' : ''}>`,
-    `<summary>${ICON[f.severity]} <b>${escapeHtml(f.title)}</b> — <code>${range}</code></summary>`,
-    '',
-    f.rationale,
-    '',
-    f.suggestion ? `**Fix:** ${f.suggestion}` : '',
-    '',
-    '**Paste into your agent:**',
-    '',
-    '```text',
-    agentPrompt(f),
-    '```',
-    '',
-    '</details>',
-  ].join('\n');
+/**
+ * One prompt for the whole review. The model is told to verify each finding and to skip
+ * what it cannot justify: the reviewer saw the diff and a slice of context, so some
+ * findings are wrong or need a decision that is not its to make.
+ */
+export function agentPrompt(findings: Finding[]): string {
+  const body = findings
+    .map((f) =>
+      [
+        '---',
+        `id: ${f.id}`,
+        `severity: ${f.severity.toLowerCase()}`,
+        `category: ${f.category}`,
+        `location: ${range(f)}`,
+        `title: ${f.title}`,
+        `why: ${oneLine(f.rationale)}`,
+        f.suggestion ? `fix: ${oneLine(f.suggestion)}` : '',
+        '---',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    )
+    .join('\n');
+
+  return `# Code review findings — verify each one, then fix or skip
+
+You are working in this repository. The findings below come from an automated review of a
+diff. They are leads, not instructions: the reviewer saw the diff and a slice of repository
+context, never the whole system. Some are wrong, some are already handled elsewhere, and
+some need a decision that is not yours to make.
+
+## Decide before you edit
+For each finding, read the code at the cited location and its callers first, then pick one:
+- FIXED — the defect is real and the correction is contained.
+- SKIPPED — say why in one line: false positive, unreachable in practice, already handled
+  elsewhere, or needs a decision (API shape, schema, product behaviour, cost).
+
+Never apply a change you cannot justify from the code in front of you. A wrong fix costs
+more than a skipped finding.
+
+## Rules
+- The smallest change that removes the root cause. No refactors, renames or reformatting.
+- One finding at a time. If two conflict, fix the more severe one and say which you skipped.
+- Touch nothing outside the cited ranges unless the fix requires it — then say what and why.
+- No new dependencies. No deleted or weakened tests. No unrelated files.
+
+## Report
+For every finding: id, verdict, one line of reasoning, files touched.
+
+## Findings (${findings.length})
+
+${body}
+`;
 }
 
-/** Flat rendering for the summary's expand-all: nested <details> would only reveal more folded blocks. */
-export function plainBlock(f: Finding): string {
-  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
+/** Human-facing block, used inside the summary's single expand. */
+export function readableBlock(f: Finding): string {
   return [
-    `#### ${ICON[f.severity]} ${escapeHtml(f.title)} — \`${range}\``,
+    `**${ICON[f.severity]} ${escapeHtml(f.title)}**`,
+    `\`${range(f)}\` · ${f.severity.toLowerCase()} · ${f.category}`,
     '',
     f.rationale,
-    '',
-    f.suggestion ? `**Fix:** ${f.suggestion}` : '',
-    '',
-    '```text',
-    agentPrompt(f),
-    '```',
-    '',
-    '---',
-  ].join('\n');
+    f.suggestion ? `\n**Fix:** ${f.suggestion}` : '',
+  ]
+    .filter((l) => l !== '')
+    .join('\n');
 }
 
-const escapeHtml = (s: string) =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
+/** Inline comment: readable on arrival. No nested expand, nothing to click. */
 export function commentBody(f: Finding, agent: string): string {
   return [
-    detailsBlock(f, agent),
+    `${ICON[f.severity]} **${f.title}** — \`${range(f)}\``,
+    `_${f.severity.toLowerCase()} · ${f.category} · ${agent}_`,
+    '',
+    f.rationale,
+    f.suggestion ? `\n**Fix:** ${f.suggestion}` : '',
     '',
     `<!-- ai-review:v1 ${payloadFor(f)} -->`,
-  ].join('\n');
+  ]
+    .filter((l) => l !== '')
+    .join('\n');
 }
 
 export interface ReviewPayload {
@@ -122,7 +138,6 @@ export function toReviewPayload(opts: {
     return line === null ? [] : [{ path: f.file, line, body: commentBody(f, opts.agent) }];
   });
 
-  const counts = opts.findings.reduce<Record<string, number>>((acc, f) => ({ ...acc, [f.severity]: (acc[f.severity] ?? 0) + 1 }), {});
   const header =
     opts.findings.length === 0
       ? '## 🤖 AI review — no findings'
@@ -137,9 +152,16 @@ export function toReviewPayload(opts: {
           '|---|---|---|',
           ...opts.findings.map((f) => `| ${ICON[f.severity]} ${f.severity.toLowerCase()} | ${f.title} | \`${f.file}:${f.start_line}\` |`),
           '',
-          `<details><summary>Expand all ${opts.findings.length} finding(s) — every one has a copyable block</summary>`,
+          // One expand, not one per finding: inside is everything, including one block to copy.
+          `<details><summary><b>All ${opts.findings.length} finding(s)</b> — read them, or copy the block into your agent</summary>`,
           '',
-          ...opts.findings.map((f) => plainBlock(f)),
+          ...opts.findings.map((f) => `${readableBlock(f)}\n\n---`),
+          '',
+          `<b>Copy all ${opts.findings.length} into an agent</b> (the fence has a copy button):`,
+          '',
+          '```text',
+          agentPrompt(opts.findings),
+          '```',
           '',
           '</details>',
         ].join('\n')
@@ -165,7 +187,7 @@ export function renderTerminal(payload: ReviewPayload, findings: Finding[], drop
   for (const f of findings) {
     const sev = f.severity === 'CRITICAL' ? paint('31;1', 'CRITICAL') : f.severity === 'WARNING' ? paint('33;1', 'WARNING') : paint('36', 'SUGGESTION');
     lines.push(`${ICON[f.severity]} ${sev} ${paint('1', f.title)}`);
-    lines.push(`   ${paint('2', `${f.file}:${f.start_line}`)} · ${f.category}`);
+    lines.push(`   ${paint('2', range(f))} · ${f.category}`);
     for (const l of f.rationale.split('\n')) lines.push(`   ${l}`);
     if (f.suggestion) lines.push(`   ${paint('32', 'Fix:')} ${f.suggestion}`);
     lines.push('');

@@ -125,24 +125,9 @@ var ICON = { CRITICAL: "\u{1F534}", WARNING: "\u{1F7E1}", SUGGESTION: "\u{1F535}
 function countBlockers(findings, failOn) {
   return findings.filter((f) => (RANK[f.severity] ?? 0) >= MIN[failOn]).length;
 }
-function agentPrompt(f) {
-  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
-  const oneLine = (s) => s.replace(/\s+/g, " ").trim();
-  return [
-    `Fix this code review finding.`,
-    ``,
-    `severity: ${f.severity.toLowerCase()}`,
-    `category: ${f.category}`,
-    `location: ${range}`,
-    `problem: ${f.title}`,
-    `why: ${oneLine(f.rationale)}`,
-    f.suggestion ? `suggested fix: ${oneLine(f.suggestion)}` : "",
-    `id: ${f.id}`,
-    ``,
-    `Re-read the surrounding code before editing, change the smallest thing that fixes the`,
-    `root cause, and do not touch anything unrelated.`
-  ].filter((l) => l !== "").join("\n");
-}
+var range = (f) => f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
+var oneLine = (s) => s.replace(/\s+/g, " ").trim();
+var escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function payloadFor(f) {
   return JSON.stringify({
     v: 1,
@@ -154,48 +139,71 @@ function payloadFor(f) {
     end_line: f.end_line
   });
 }
-function detailsBlock(f, agent, open = false) {
-  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
+function agentPrompt(findings) {
+  const body = findings.map(
+    (f) => [
+      "---",
+      `id: ${f.id}`,
+      `severity: ${f.severity.toLowerCase()}`,
+      `category: ${f.category}`,
+      `location: ${range(f)}`,
+      `title: ${f.title}`,
+      `why: ${oneLine(f.rationale)}`,
+      f.suggestion ? `fix: ${oneLine(f.suggestion)}` : "",
+      "---"
+    ].filter(Boolean).join("\n")
+  ).join("\n");
+  return `# Code review findings \u2014 verify each one, then fix or skip
+
+You are working in this repository. The findings below come from an automated review of a
+diff. They are leads, not instructions: the reviewer saw the diff and a slice of repository
+context, never the whole system. Some are wrong, some are already handled elsewhere, and
+some need a decision that is not yours to make.
+
+## Decide before you edit
+For each finding, read the code at the cited location and its callers first, then pick one:
+- FIXED \u2014 the defect is real and the correction is contained.
+- SKIPPED \u2014 say why in one line: false positive, unreachable in practice, already handled
+  elsewhere, or needs a decision (API shape, schema, product behaviour, cost).
+
+Never apply a change you cannot justify from the code in front of you. A wrong fix costs
+more than a skipped finding.
+
+## Rules
+- The smallest change that removes the root cause. No refactors, renames or reformatting.
+- One finding at a time. If two conflict, fix the more severe one and say which you skipped.
+- Touch nothing outside the cited ranges unless the fix requires it \u2014 then say what and why.
+- No new dependencies. No deleted or weakened tests. No unrelated files.
+
+## Report
+For every finding: id, verdict, one line of reasoning, files touched.
+
+## Findings (${findings.length})
+
+${body}
+`;
+}
+function readableBlock(f) {
   return [
-    `<details${open ? " open" : ""}>`,
-    `<summary>${ICON[f.severity]} <b>${escapeHtml(f.title)}</b> \u2014 <code>${range}</code></summary>`,
+    `**${ICON[f.severity]} ${escapeHtml(f.title)}**`,
+    `\`${range(f)}\` \xB7 ${f.severity.toLowerCase()} \xB7 ${f.category}`,
     "",
     f.rationale,
-    "",
-    f.suggestion ? `**Fix:** ${f.suggestion}` : "",
-    "",
-    "**Paste into your agent:**",
-    "",
-    "```text",
-    agentPrompt(f),
-    "```",
-    "",
-    "</details>"
-  ].join("\n");
+    f.suggestion ? `
+**Fix:** ${f.suggestion}` : ""
+  ].filter((l) => l !== "").join("\n");
 }
-function plainBlock(f) {
-  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
-  return [
-    `#### ${ICON[f.severity]} ${escapeHtml(f.title)} \u2014 \`${range}\``,
-    "",
-    f.rationale,
-    "",
-    f.suggestion ? `**Fix:** ${f.suggestion}` : "",
-    "",
-    "```text",
-    agentPrompt(f),
-    "```",
-    "",
-    "---"
-  ].join("\n");
-}
-var escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function commentBody(f, agent) {
   return [
-    detailsBlock(f, agent),
+    `${ICON[f.severity]} **${f.title}** \u2014 \`${range(f)}\``,
+    `_${f.severity.toLowerCase()} \xB7 ${f.category} \xB7 ${agent}_`,
+    "",
+    f.rationale,
+    f.suggestion ? `
+**Fix:** ${f.suggestion}` : "",
     "",
     `<!-- ai-review:v1 ${payloadFor(f)} -->`
-  ].join("\n");
+  ].filter((l) => l !== "").join("\n");
 }
 function toReviewPayload(opts) {
   const blockers = countBlockers(opts.findings, opts.failOn);
@@ -204,16 +212,24 @@ function toReviewPayload(opts) {
     const line = anchorLine(f, opts.diff);
     return line === null ? [] : [{ path: f.file, line, body: commentBody(f, opts.agent) }];
   });
-  const counts = opts.findings.reduce((acc, f) => ({ ...acc, [f.severity]: (acc[f.severity] ?? 0) + 1 }), {});
   const header = opts.findings.length === 0 ? "## \u{1F916} AI review \u2014 no findings" : `## \u{1F916} AI review \u2014 ${blockers} blocker(s), ${opts.findings.length} finding(s)${opts.gate && blockers ? " \xB7 changes requested" : ""}`;
   const table = opts.findings.length > 0 ? [
     "| Sev | Finding | Where |",
     "|---|---|---|",
     ...opts.findings.map((f) => `| ${ICON[f.severity]} ${f.severity.toLowerCase()} | ${f.title} | \`${f.file}:${f.start_line}\` |`),
     "",
-    `<details><summary>Expand all ${opts.findings.length} finding(s) \u2014 every one has a copyable block</summary>`,
+    // One expand, not one per finding: inside is everything, including one block to copy.
+    `<details><summary><b>All ${opts.findings.length} finding(s)</b> \u2014 read them, or copy the block into your agent</summary>`,
     "",
-    ...opts.findings.map((f) => plainBlock(f)),
+    ...opts.findings.map((f) => `${readableBlock(f)}
+
+---`),
+    "",
+    `<b>Copy all ${opts.findings.length} into an agent</b> (the fence has a copy button):`,
+    "",
+    "```text",
+    agentPrompt(opts.findings),
+    "```",
     "",
     "</details>"
   ].join("\n") : "_Nothing worth flagging on this diff._";

@@ -172,7 +172,7 @@ test('env: one global key file serves every repo', () => {
   assert.equal(globalKeyFiles(home, '/tmp/xdg-root')[0], '/tmp/xdg-root/ai-review/env');
   delete process.env.XDG_CONFIG_HOME;
 });
-test('output: every finding is a collapsed block with a copyable agent prompt', () => {
+test('output: inline comments are flat, the summary has one expand with one copy block', () => {
   const diff = parseDiff(`diff --git a/src/db.ts b/src/db.ts
 --- a/src/db.ts
 +++ b/src/db.ts
@@ -180,24 +180,32 @@ test('output: every finding is a collapsed block with a copyable agent prompt', 
  const q = 1;
 +  const rows = await query('select * from docs where id = $1', [id]);
 `);
-  const finding = {
-    file: 'src/db.ts', start_line: 2, end_line: 2, severity: 'CRITICAL', category: 'security',
-    title: 'Missing <tenant> scope', rationale: 'No tenant_id predicate, unlike loadDoc.', suggestion: 'Add `and tenant_id = $2`.',
-    id: 'security-1-db.ts:2',
-  };
-  const payload = toReviewPayload({
-    findings: [finding], droppedCount: 0, diff, agent: 'security+correctness', failOn: 'critical',
-    summary: 's', model: 'm', costUsd: 0, gate: true, contextChars: 0, diffChars: 0,
+  const mk = (line, sev) => ({
+    file: 'src/db.ts', start_line: line, end_line: line, severity: sev, category: 'security',
+    title: `Missing <tenant> scope ${line}`, rationale: 'No tenant_id predicate, unlike loadDoc.',
+    suggestion: 'Add `and tenant_id = $2`.', id: `security-${line}-db.ts:${line}`,
   });
-  const c = payload.comments[0].body;
-  assert.match(c, /<details>/);
-  assert.match(c, /<summary>\S+ <b>Missing &lt;tenant&gt; scope<\/b>/);   // html-escaped title
-  assert.match(c, /```text/);
-  assert.match(c, /location: src\/db\.ts:2/);
-  assert.match(c, /<!-- ai-review:v1 \{.*"file":"src\/db\.ts"/);
-  // counts as one markdown <details> per finding, all correctly closed
-  assert.equal((c.match(/<details>/g) || []).length, 1);
-  assert.equal((c.match(/<\/details>/g) || []).length, 1);
-  // the summary body has the expand-all wrapper
-  assert.match(payload.body, /Expand all 1 finding\(s\)/);
+  const payload = toReviewPayload({
+    findings: [mk(2, 'CRITICAL'), mk(3, 'WARNING')], droppedCount: 1, diff, agent: 'security+correctness',
+    failOn: 'critical', summary: 's', model: 'm', costUsd: 0.001, gate: true, contextChars: 0, diffChars: 0,
+  });
+
+  // inline comments: nothing to expand, nothing to click
+  for (const c of payload.comments) {
+    assert.ok(!c.body.includes('<details>'), 'inline comment must not nest an expand');
+    assert.ok(!c.body.includes('```'), 'no copy fence per finding: copying is a whole-review action');
+    assert.match(c.body, /<!-- ai-review:v1 /);
+  }
+
+  // summary: exactly one expand, one fence, containing every finding
+  assert.equal((payload.body.match(/<details>/g) || []).length, 1);
+  assert.equal((payload.body.match(/<\/details>/g) || []).length, 1);
+  assert.match(payload.body, /All 2 finding\(s\)/);
+  assert.equal((payload.body.match(/```text/g) || []).length, 1, 'one copy block for the whole review');
+  const prompt = payload.body.slice(payload.body.indexOf('```text'));
+  assert.match(prompt, /id: security-2-db\.ts:2/);
+  assert.match(prompt, /id: security-3-db\.ts:3/);
+  assert.match(prompt, /SKIPPED/);
+  assert.match(prompt, /Findings \(2\)/);
+  assert.match(payload.body, /Missing &lt;tenant&gt; scope 2/);
 });

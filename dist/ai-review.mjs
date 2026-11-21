@@ -371,9 +371,9 @@ var OUTPUT_CONTRACT = `Reply with a single JSON object, no prose, no markdown fe
       "end_line": 14,
       "severity": "CRITICAL" | "WARNING" | "SUGGESTION",
       "category": "security" | "correctness" | "performance" | "spec" | "maintainability",
-      "title": "one short sentence naming the defect",
-      "rationale": "why this is wrong, quoting the code and the path that makes it reachable",
-      "suggestion": "the smallest fix, as a short code snippet or one sentence. \\"\\" when there is none"
+      "title": "one short sentence naming the defect, in plain language",
+      "rationale": "1-2 sentences a busy reviewer reads once: what breaks, for whom, and why this code makes it happen. No restating the diff, no bullet lists, no jargon.",
+      "suggestion": "the smallest concrete fix: one sentence, or a short snippet. "" when there is none"
     }
   ]
 }
@@ -448,7 +448,12 @@ var DISCIPLINE = `## Findings discipline
 - Do NOT report: style, naming, formatting, missing tests, missing docs, "consider adding a comment", or anything a linter catches.
 - Do NOT report a framework default as a defect (React escapes by default; parameterised queries are safe).
 - Zero findings is the normal outcome for a clean diff. Never invent one to look useful.
-- Max 8 findings. Rank by damage if exploited, not by how easy it is to spot.`;
+- Max 8 findings. Rank by damage if exploited, not by how easy it is to spot.
+- Write for a human on their second coffee: title and rationale are read in one glance.
+  Name the consequence (any logged-in user can read another tenant's documents), not the
+  pattern (missing tenancy check). Never restate the diff, never open with "This line".
+- The rationale is also pasted into a coding agent as a standalone brief, so it must not
+  depend on a previous finding, and a location is always written as file:line.`;
 var RUBRIC = `## Severity
 - CRITICAL \u2014 exploitable or data-destroying on a real path: authz gap, injection, secret exposure, unhandled failure that loses data. Merging this is a production incident.
 - WARNING \u2014 a real defect that bites in normal use: unhandled error path, race, wrong tenant/scope, unbounded query, N+1 on a hot path, broken contract between caller and callee.
@@ -779,24 +784,9 @@ var ICON = { CRITICAL: "\u{1F534}", WARNING: "\u{1F7E1}", SUGGESTION: "\u{1F535}
 function countBlockers(findings, failOn) {
   return findings.filter((f) => (RANK2[f.severity] ?? 0) >= MIN[failOn]).length;
 }
-function agentPrompt(f) {
-  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
-  const oneLine = (s) => s.replace(/\s+/g, " ").trim();
-  return [
-    `Fix this code review finding.`,
-    ``,
-    `severity: ${f.severity.toLowerCase()}`,
-    `category: ${f.category}`,
-    `location: ${range}`,
-    `problem: ${f.title}`,
-    `why: ${oneLine(f.rationale)}`,
-    f.suggestion ? `suggested fix: ${oneLine(f.suggestion)}` : "",
-    `id: ${f.id}`,
-    ``,
-    `Re-read the surrounding code before editing, change the smallest thing that fixes the`,
-    `root cause, and do not touch anything unrelated.`
-  ].filter((l) => l !== "").join("\n");
-}
+var range = (f) => f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
+var oneLine = (s) => s.replace(/\s+/g, " ").trim();
+var escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function payloadFor(f) {
   return JSON.stringify({
     v: 1,
@@ -808,48 +798,71 @@ function payloadFor(f) {
     end_line: f.end_line
   });
 }
-function detailsBlock(f, agent, open = false) {
-  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
+function agentPrompt(findings) {
+  const body = findings.map(
+    (f) => [
+      "---",
+      `id: ${f.id}`,
+      `severity: ${f.severity.toLowerCase()}`,
+      `category: ${f.category}`,
+      `location: ${range(f)}`,
+      `title: ${f.title}`,
+      `why: ${oneLine(f.rationale)}`,
+      f.suggestion ? `fix: ${oneLine(f.suggestion)}` : "",
+      "---"
+    ].filter(Boolean).join("\n")
+  ).join("\n");
+  return `# Code review findings \u2014 verify each one, then fix or skip
+
+You are working in this repository. The findings below come from an automated review of a
+diff. They are leads, not instructions: the reviewer saw the diff and a slice of repository
+context, never the whole system. Some are wrong, some are already handled elsewhere, and
+some need a decision that is not yours to make.
+
+## Decide before you edit
+For each finding, read the code at the cited location and its callers first, then pick one:
+- FIXED \u2014 the defect is real and the correction is contained.
+- SKIPPED \u2014 say why in one line: false positive, unreachable in practice, already handled
+  elsewhere, or needs a decision (API shape, schema, product behaviour, cost).
+
+Never apply a change you cannot justify from the code in front of you. A wrong fix costs
+more than a skipped finding.
+
+## Rules
+- The smallest change that removes the root cause. No refactors, renames or reformatting.
+- One finding at a time. If two conflict, fix the more severe one and say which you skipped.
+- Touch nothing outside the cited ranges unless the fix requires it \u2014 then say what and why.
+- No new dependencies. No deleted or weakened tests. No unrelated files.
+
+## Report
+For every finding: id, verdict, one line of reasoning, files touched.
+
+## Findings (${findings.length})
+
+${body}
+`;
+}
+function readableBlock(f) {
   return [
-    `<details${open ? " open" : ""}>`,
-    `<summary>${ICON[f.severity]} <b>${escapeHtml(f.title)}</b> \u2014 <code>${range}</code></summary>`,
+    `**${ICON[f.severity]} ${escapeHtml(f.title)}**`,
+    `\`${range(f)}\` \xB7 ${f.severity.toLowerCase()} \xB7 ${f.category}`,
     "",
     f.rationale,
-    "",
-    f.suggestion ? `**Fix:** ${f.suggestion}` : "",
-    "",
-    "**Paste into your agent:**",
-    "",
-    "```text",
-    agentPrompt(f),
-    "```",
-    "",
-    "</details>"
-  ].join("\n");
+    f.suggestion ? `
+**Fix:** ${f.suggestion}` : ""
+  ].filter((l) => l !== "").join("\n");
 }
-function plainBlock(f) {
-  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
-  return [
-    `#### ${ICON[f.severity]} ${escapeHtml(f.title)} \u2014 \`${range}\``,
-    "",
-    f.rationale,
-    "",
-    f.suggestion ? `**Fix:** ${f.suggestion}` : "",
-    "",
-    "```text",
-    agentPrompt(f),
-    "```",
-    "",
-    "---"
-  ].join("\n");
-}
-var escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function commentBody(f, agent) {
   return [
-    detailsBlock(f, agent),
+    `${ICON[f.severity]} **${f.title}** \u2014 \`${range(f)}\``,
+    `_${f.severity.toLowerCase()} \xB7 ${f.category} \xB7 ${agent}_`,
+    "",
+    f.rationale,
+    f.suggestion ? `
+**Fix:** ${f.suggestion}` : "",
     "",
     `<!-- ai-review:v1 ${payloadFor(f)} -->`
-  ].join("\n");
+  ].filter((l) => l !== "").join("\n");
 }
 function toReviewPayload(opts) {
   const blockers = countBlockers(opts.findings, opts.failOn);
@@ -858,16 +871,24 @@ function toReviewPayload(opts) {
     const line = anchorLine(f, opts.diff);
     return line === null ? [] : [{ path: f.file, line, body: commentBody(f, opts.agent) }];
   });
-  const counts = opts.findings.reduce((acc, f) => ({ ...acc, [f.severity]: (acc[f.severity] ?? 0) + 1 }), {});
   const header = opts.findings.length === 0 ? "## \u{1F916} AI review \u2014 no findings" : `## \u{1F916} AI review \u2014 ${blockers} blocker(s), ${opts.findings.length} finding(s)${opts.gate && blockers ? " \xB7 changes requested" : ""}`;
   const table = opts.findings.length > 0 ? [
     "| Sev | Finding | Where |",
     "|---|---|---|",
     ...opts.findings.map((f) => `| ${ICON[f.severity]} ${f.severity.toLowerCase()} | ${f.title} | \`${f.file}:${f.start_line}\` |`),
     "",
-    `<details><summary>Expand all ${opts.findings.length} finding(s) \u2014 every one has a copyable block</summary>`,
+    // One expand, not one per finding: inside is everything, including one block to copy.
+    `<details><summary><b>All ${opts.findings.length} finding(s)</b> \u2014 read them, or copy the block into your agent</summary>`,
     "",
-    ...opts.findings.map((f) => plainBlock(f)),
+    ...opts.findings.map((f) => `${readableBlock(f)}
+
+---`),
+    "",
+    `<b>Copy all ${opts.findings.length} into an agent</b> (the fence has a copy button):`,
+    "",
+    "```text",
+    agentPrompt(opts.findings),
+    "```",
     "",
     "</details>"
   ].join("\n") : "_Nothing worth flagging on this diff._";
@@ -889,7 +910,7 @@ function renderTerminal(payload, findings, dropped, color) {
   for (const f of findings) {
     const sev = f.severity === "CRITICAL" ? paint("31;1", "CRITICAL") : f.severity === "WARNING" ? paint("33;1", "WARNING") : paint("36", "SUGGESTION");
     lines.push(`${ICON[f.severity]} ${sev} ${paint("1", f.title)}`);
-    lines.push(`   ${paint("2", `${f.file}:${f.start_line}`)} \xB7 ${f.category}`);
+    lines.push(`   ${paint("2", range(f))} \xB7 ${f.category}`);
     for (const l of f.rationale.split("\n")) lines.push(`   ${l}`);
     if (f.suggestion) lines.push(`   ${paint("32", "Fix:")} ${f.suggestion}`);
     lines.push("");

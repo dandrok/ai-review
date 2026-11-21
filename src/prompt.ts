@@ -17,7 +17,12 @@ const DISCIPLINE = `## Findings discipline
 - Do NOT report: style, naming, formatting, missing tests, missing docs, "consider adding a comment", or anything a linter catches.
 - Do NOT report a framework default as a defect (React escapes by default; parameterised queries are safe).
 - Zero findings is the normal outcome for a clean diff. Never invent one to look useful.
-- Max 8 findings. Rank by damage if exploited, not by how easy it is to spot.`;
+- Max 8 findings. Rank by damage if exploited, not by how easy it is to spot.
+- Write for a human on their second coffee: title and rationale are read in one glance.
+  Name the consequence (any logged-in user can read another tenant's documents), not the
+  pattern (missing tenancy check). Never restate the diff, never open with "This line".
+- The rationale is also pasted into a coding agent as a standalone brief, so it must not
+  depend on a previous finding, and a location is always written as file:line.`;
 
 const RUBRIC = `## Severity
 - CRITICAL — exploitable or data-destroying on a real path: authz gap, injection, secret exposure, unhandled failure that loses data. Merging this is a production incident.
