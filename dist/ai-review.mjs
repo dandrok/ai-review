@@ -894,15 +894,13 @@ ${payload.comments.map((c) => `- \`${c.path}:${c.line}\` \u2014 ${c.body.split("
 // src/env.ts
 import { existsSync as existsSync3, readFileSync as readFileSync5 } from "node:fs";
 import { join as join3 } from "node:path";
-function loadDotEnv(dirs, names = [".env", ".env.local"]) {
+function loadDotEnvFiles(paths) {
   const files = [];
   const vars = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const dir of dirs) {
-    if (!dir) continue;
-    for (const name of names) {
-      const path = join3(dir, name);
-      if (seen.has(path) || !existsSync3(path)) continue;
+  {
+    for (const path of paths) {
+      if (!path || seen.has(path) || !existsSync3(path)) continue;
       seen.add(path);
       let text;
       try {
@@ -928,6 +926,16 @@ function loadDotEnv(dirs, names = [".env", ".env.local"]) {
     }
   }
   return { files, vars };
+}
+function globalKeyFiles(home = process.env.HOME ?? "") {
+  if (!home) return [];
+  const xdg = process.env.XDG_CONFIG_HOME || join3(home, ".config");
+  return [join3(xdg, "ai-review", "env"), join3(home, ".ai-review.env")];
+}
+function loadEnv(cwd, toolDir = "") {
+  const paths = [join3(cwd, ".env"), join3(cwd, ".env.local"), ...globalKeyFiles()];
+  if (toolDir) paths.push(join3(toolDir, ".env"));
+  return loadDotEnvFiles(paths);
 }
 function describeEnvLoad(res) {
   if (!res.files.length) return null;
@@ -1020,7 +1028,7 @@ async function runReview(opts) {
     say(`  diff: ${numbered.length} chars \xB7 context: ${ctx.chars}/${fileCfg.budget_chars} chars \xB7 packs: ${packs.map((p) => p.id).join(", ")}`);
     return { exitCode: 0 };
   }
-  loadDotEnv([root]);
+  loadEnv(root, root);
   const apiKey = process.env.DEEPSEEK_API_KEY || process.env.AI_REVIEW_API_KEY || "";
   if (!apiKey && !opts.mock) throw new Error("DEEPSEEK_API_KEY is not set (needed unless --mock is used)");
   const messages = buildMessages({
@@ -1215,6 +1223,8 @@ function initProject(opts) {
 }
 
 // src/cli.ts
+import { dirname as dirname3 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 var VERSION = "0.1.0";
 var HELP = `ai-review ${VERSION} \u2014 diff-grounded AI code review, one cheap model.
 
@@ -1347,7 +1357,8 @@ function parseArgs(argv) {
 }
 async function main() {
   const argv = process.argv.slice(2);
-  const envNote = describeEnvLoad(loadDotEnv([process.cwd()]));
+  const toolDir = dirname3(fileURLToPath3(import.meta.url)) + "/..";
+  const envNote = describeEnvLoad(loadEnv(process.cwd(), toolDir));
   if (envNote) process.stderr.write(`ai-review: ${envNote}
 `);
   if (!argv.length || argv[0] === "--help" || argv[0] === "-h") {

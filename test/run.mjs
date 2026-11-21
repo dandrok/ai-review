@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   parseDiff, numberedDiff, groundFindings, countBlockers, validateReview,
   dedupFindings, staticFindings, globToRegExp, estimateCost, loadDotEnv, ensureGitignore,
+  loadDotEnvFiles, globalKeyFiles,
 } from '../dist/lib.mjs';
 
 const DIFF = `diff --git a/src/export.ts b/src/export.ts
@@ -153,4 +154,15 @@ test('gitignore: creates the secrets block once, then leaves it alone', () => {
   const second = ensureGitignore(dir);
   assert.match(second[0], /already covers/);
   assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), text);
+});
+test('env: one global key file serves every repo', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ai-review-home-'));
+  mkdirSync(join(home, '.config', 'ai-review'), { recursive: true });
+  writeFileSync(join(home, '.config', 'ai-review', 'env'), 'AI_REVIEW_GLOBAL_KEY=from-global\n');
+  const paths = globalKeyFiles(home);
+  assert.equal(paths.length, 2);
+  assert.equal(paths[0], join(home, '.config', 'ai-review', 'env'));
+  const res = loadDotEnvFiles(paths);
+  assert.equal(process.env.AI_REVIEW_GLOBAL_KEY, 'from-global');
+  assert.equal(res.files.length, 1);
 });

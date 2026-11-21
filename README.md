@@ -172,7 +172,24 @@ Environment: `DEEPSEEK_API_KEY` (required), `AI_REVIEW_BASE_URL` (any OpenAI-com
 
 ### Where the key lives
 
-The CLI reads `.env` / `.env.local` from the current directory and from the repo root, so a local `DEEPSEEK_API_KEY` needs no shell plumbing. A variable already exported in your environment always wins over the file — a committed `.env` can never shadow a CI secret.
+The CLI looks for the key in this order, and a variable already exported in your shell always wins over every file — a committed `.env` can never shadow a CI secret:
+
+| # | Location | Use |
+|---|---|---|
+| 1 | `./.env`, `./.env.local` in the repo being reviewed | per-project key, or a different model per repo |
+| 2 | `$XDG_CONFIG_HOME/ai-review/env` or `~/.config/ai-review/env` | **one key for every repo** — the recommended setup |
+| 3 | `~/.ai-review.env` | same thing, if you prefer it out of `~/.config` |
+| 4 | `.env` next to the installed tool (`~/git/ai-review/.env`) | also gitignored, if you keep the tool in a fixed place |
+
+The first file that defines a variable wins, so a repo's own `.env` always beats the global key.
+
+So a single file makes the tool work from any directory:
+
+```bash
+mkdir -p ~/.config/ai-review && printf 'DEEPSEEK_API_KEY=sk-...\n' > ~/.config/ai-review/env && chmod 600 ~/.config/ai-review/env
+```
+
+The global file is outside every git repo, so there is nothing to leak — no `.gitignore` entry to remember, no `.env` to accidentally commit.
 
 The key is never printed, logged, or written to `.ai-review/last.json`; the only thing reported is which *names* were loaded.
 

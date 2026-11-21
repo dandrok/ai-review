@@ -7,5 +7,5 @@ export { staticFindings } from './static.ts';
 export { globToRegExp, ignored } from './config.ts';
 export { estimateCost, isPeak } from './llm.ts';
 export { touchedSymbols } from './context.ts';
-export { loadDotEnv } from './env.ts';
+export { loadDotEnv, loadEnv, loadDotEnvFiles, globalKeyFiles } from './env.ts';
 export { ensureGitignore } from './init.ts';

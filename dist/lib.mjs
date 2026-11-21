@@ -382,15 +382,13 @@ function touchedSymbols(diff) {
 // src/env.ts
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-function loadDotEnv(dirs, names = [".env", ".env.local"]) {
+function loadDotEnvFiles(paths) {
   const files = [];
   const vars = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const dir of dirs) {
-    if (!dir) continue;
-    for (const name of names) {
-      const path = join(dir, name);
-      if (seen.has(path) || !existsSync(path)) continue;
+  {
+    for (const path of paths) {
+      if (!path || seen.has(path) || !existsSync(path)) continue;
       seen.add(path);
       let text;
       try {
@@ -416,6 +414,24 @@ function loadDotEnv(dirs, names = [".env", ".env.local"]) {
     }
   }
   return { files, vars };
+}
+function loadDotEnv(dirs, names = [".env", ".env.local"]) {
+  const paths = [];
+  for (const dir of dirs) {
+    if (!dir) continue;
+    for (const name of names) paths.push(join(dir, name));
+  }
+  return loadDotEnvFiles(paths);
+}
+function globalKeyFiles(home = process.env.HOME ?? "") {
+  if (!home) return [];
+  const xdg = process.env.XDG_CONFIG_HOME || join(home, ".config");
+  return [join(xdg, "ai-review", "env"), join(home, ".ai-review.env")];
+}
+function loadEnv(cwd, toolDir = "") {
+  const paths = [join(cwd, ".env"), join(cwd, ".env.local"), ...globalKeyFiles()];
+  if (toolDir) paths.push(join(toolDir, ".env"));
+  return loadDotEnvFiles(paths);
 }
 
 // src/init.ts
@@ -457,10 +473,13 @@ export {
   ensureGitignore,
   estimateCost,
   globToRegExp,
+  globalKeyFiles,
   groundFindings,
   ignored,
   isPeak,
   loadDotEnv,
+  loadDotEnvFiles,
+  loadEnv,
   numberedDiff,
   parseDiff,
   staticFindings,

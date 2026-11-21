@@ -8,16 +8,14 @@ import { join } from 'node:path';
  * Rules: a variable already present in the real environment always wins, so a committed
  * .env can never override a CI secret.
  */
-export function loadDotEnv(dirs: string[], names = ['.env', '.env.local']): { files: string[]; vars: string[] } {
+export function loadDotEnvFiles(paths: string[]): { files: string[]; vars: string[] } {
   const files: string[] = [];
   const vars: string[] = [];
   const seen = new Set<string>();
 
-  for (const dir of dirs) {
-    if (!dir) continue;
-    for (const name of names) {
-      const path = join(dir, name);
-      if (seen.has(path) || !existsSync(path)) continue;
+  {
+    for (const path of paths) {
+      if (!path || seen.has(path) || !existsSync(path)) continue;
       seen.add(path);
       let text: string;
       try {
@@ -43,6 +41,37 @@ export function loadDotEnv(dirs: string[], names = ['.env', '.env.local']): { fi
     }
   }
   return { files, vars };
+}
+
+/** Per-directory convenience wrapper: <dir>/.env then <dir>/.env.local. */
+export function loadDotEnv(dirs: string[], names = ['.env', '.env.local']): { files: string[]; vars: string[] } {
+  const paths: string[] = [];
+  for (const dir of dirs) {
+    if (!dir) continue;
+    for (const name of names) paths.push(join(dir, name));
+  }
+  return loadDotEnvFiles(paths);
+}
+
+/**
+ * Global key file, so one DEEPSEEK_API_KEY serves every repo:
+ * $XDG_CONFIG_HOME/ai-review/env, ~/.config/ai-review/env, or ~/.ai-review.env.
+ * Loaded after the project files, so a project .env still wins.
+ */
+export function globalKeyFiles(home = process.env.HOME ?? ''): string[] {
+  if (!home) return [];
+  const xdg = process.env.XDG_CONFIG_HOME || join(home, '.config');
+  return [join(xdg, 'ai-review', 'env'), join(home, '.ai-review.env')];
+}
+
+/**
+ * Everything the CLI loads for a repo, first match per variable wins:
+ * the repo's own files → the global key file → a .env sitting next to the installed tool.
+ */
+export function loadEnv(cwd: string, toolDir = '') {
+  const paths = [join(cwd, '.env'), join(cwd, '.env.local'), ...globalKeyFiles()];
+  if (toolDir) paths.push(join(toolDir, '.env'));
+  return loadDotEnvFiles(paths);
 }
 
 /** Names are safe to print; values are not. */
