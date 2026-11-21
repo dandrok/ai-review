@@ -58,7 +58,8 @@ const server = createServer((req, res) => {
   });
 });
 
-server.listen(8899, '127.0.0.1', () => console.log('stub listening on 8899'));
+const PORT = Number(process.env.PORT ?? 8899);
+server.listen(PORT, '127.0.0.1', () => console.log(`stub listening on ${PORT}`));
 
 process.on('SIGTERM', () => {
   console.log(JSON.stringify({ calls, lastBodyKeys: Object.keys(bodies.at(-1) ?? {}), systemChars: bodies.at(-1)?.messages?.[0]?.content?.length }));

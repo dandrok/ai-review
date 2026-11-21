@@ -12,6 +12,7 @@ import { groundFindings } from './grounding.ts';
 import { dedupFindings, assignIds } from './dedup.ts';
 import { countBlockers, renderTerminal, toReviewPayload } from './gate.ts';
 import { detectGh, postReview } from './github.ts';
+import { loadDotEnv } from './env.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -116,6 +117,7 @@ export async function runReview(opts: RunOptions): Promise<{ exitCode: number }>
     return { exitCode: 0 };
   }
 
+  loadDotEnv([root]);
   const apiKey = process.env.DEEPSEEK_API_KEY || process.env.AI_REVIEW_API_KEY || '';
   if (!apiKey && !opts.mock) throw new Error('DEEPSEEK_API_KEY is not set (needed unless --mock is used)');
 

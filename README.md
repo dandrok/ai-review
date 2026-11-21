@@ -170,6 +170,22 @@ Exit codes: `0` clean (or below `fail_on`), `1` blockers found, `2` tool error. 
 
 Environment: `DEEPSEEK_API_KEY` (required), `AI_REVIEW_BASE_URL` (any OpenAI-compatible endpoint), `GITHUB_TOKEN` + `GITHUB_REPOSITORY` (auto-detected in Actions).
 
+### Where the key lives
+
+The CLI reads `.env` / `.env.local` from the current directory and from the repo root, so a local `DEEPSEEK_API_KEY` needs no shell plumbing. A variable already exported in your environment always wins over the file — a committed `.env` can never shadow a CI secret.
+
+The key is never printed, logged, or written to `.ai-review/last.json`; the only thing reported is which *names* were loaded.
+
+`.env` is ignored three ways, so an accidental `git add -A` cannot leak it:
+
+| Where | What guards it |
+|---|---|
+| this repo | `.gitignore` — `.env`, `.env.*`, `!.env.example`, `*.pem`, `*.p12`, `*.pfx`, `id_rsa*`, `id_ed25519*` |
+| any repo that ran `ai-review init` | the same block is appended to that repo's `.gitignore` (idempotent, comments and all) |
+| a repo without the block | the pre-model static pass flags a committed `.env` in the diff before any model call |
+
+`.env.example` is deliberately **not** ignored — commit it with empty values.
+
 [↑ Contents](#contents)
 
 ---

@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   parseDiff, numberedDiff, groundFindings, countBlockers, validateReview,
-  dedupFindings, staticFindings, globToRegExp, estimateCost,
+  dedupFindings, staticFindings, globToRegExp, estimateCost, loadDotEnv, ensureGitignore,
 } from '../dist/lib.mjs';
 
 const DIFF = `diff --git a/src/export.ts b/src/export.ts
@@ -121,4 +124,33 @@ test('config: glob semantics', () => {
 test('cost: cache hits dominate', () => {
   const hit = estimateCost('deepseek-flash', { prompt_tokens: 20000, completion_tokens: 1000, cache_hit_tokens: 18000, cache_miss_tokens: 2000 }, new Date('2026-11-21T22:00:00Z'));
   assert.ok(hit > 0 && hit < 0.005, `expected < $0.005, got ${hit}`);
+});
+test('env: .env loads, quotes and comments handled, real environment wins', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ai-review-env-'));
+  writeFileSync(
+    join(dir, '.env'),
+    '# comment line\nexport FOO_A=from-file\nFOO_B="quoted value"\nFOO_C=bare # trailing comment\nDEEPSEEK_API_KEY=from-file\n',
+  );
+  process.env.DEEPSEEK_API_KEY = 'from-shell';
+  const res = loadDotEnv([dir]);
+  assert.equal(process.env.FOO_A, 'from-file');
+  assert.equal(process.env.FOO_B, 'quoted value');
+  assert.equal(process.env.FOO_C, 'bare');
+  assert.equal(process.env.DEEPSEEK_API_KEY, 'from-shell', 'a shell variable must never be overridden by .env');
+  assert.deepEqual([...res.vars].sort(), ['FOO_A', 'FOO_B', 'FOO_C']);
+  assert.equal(res.files.length, 1);
+  delete process.env.FOO_A; delete process.env.FOO_B; delete process.env.FOO_C;
+});
+
+test('gitignore: creates the secrets block once, then leaves it alone', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ai-review-gi-'));
+  const first = ensureGitignore(dir);
+  const text = readFileSync(join(dir, '.gitignore'), 'utf8');
+  for (const pattern of ['.env', '.env.*', '!.env.example', '*.pem', 'id_rsa*', '.ai-review/']) {
+    assert.ok(text.split('\n').includes(pattern), `missing ${pattern}`);
+  }
+  assert.match(first[0], /created/);
+  const second = ensureGitignore(dir);
+  assert.match(second[0], /already covers/);
+  assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), text);
 });

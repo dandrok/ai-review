@@ -75,6 +75,38 @@ export function installHooks(opts: { preCommit: boolean; prePush: boolean }): st
   return written;
 }
 
+const GITIGNORE_BLOCK = [
+  '# --- secrets: never commit these ---',
+  '.env',
+  '.env.*',
+  '!.env.example',
+  '!.env.sample',
+  '*.pem',
+  '*.p12',
+  '*.pfx',
+  'id_rsa*',
+  'id_ed25519*',
+  '# --- ai-review run artifacts ---',
+  '.ai-review/',
+];
+
+/**
+ * Idempotently add the credential block to the target repo's .gitignore.
+ * A committed .env is permanent: it stays in history after deletion and must be rotated,
+ * so it is worth one file write to keep the file out of git from the first commit.
+ */
+export function ensureGitignore(root: string): string[] {
+  const path = join(root, '.gitignore');
+  const existing = existsSync(path) ? readFileSync(path, 'utf8') : '';
+  const have = new Set(existing.split('\n').map((l) => l.trim()));
+  const missing = GITIGNORE_BLOCK.filter((l) => !have.has(l));
+  if (!missing.length) return ['.gitignore already covers secrets'];
+  const header = existing.endsWith('\n') || !existing ? '' : '\n';
+  const body = existing + header + (existing ? '\n' : '') + missing.join('\n') + '\n';
+  writeFileSync(path, body);
+  return [`${existing ? 'updated' : 'created'} .gitignore (+${missing.filter((l) => !l.startsWith('#')).length} pattern(s))`];
+}
+
 export function initProject(opts: { force: boolean; hooks: boolean; workflow: boolean }): string[] {
   const root = repoRoot();
   const log: string[] = [];
@@ -87,14 +119,7 @@ export function initProject(opts: { force: boolean; hooks: boolean; workflow: bo
   };
   put('.ai-review.yml', CONFIG);
   if (opts.workflow) put('.github/workflows/ai-review.yml', template('review.yml', ''));
-  const gi = join(root, '.gitignore');
-  if (existsSync(gi)) {
-    const body = readFileSync(gi, 'utf8');
-    if (!body.includes('.ai-review/')) {
-      writeFileSync(gi, body + '\n# ai-review run artifacts\n.ai-review/\n');
-      log.push('appended .ai-review/ to .gitignore');
-    }
-  }
+  log.push(...ensureGitignore(root));
   if (opts.hooks) log.push(...installHooks({ preCommit: false, prePush: true }).map((h) => `hook: ${h}`));
   return log;
 }

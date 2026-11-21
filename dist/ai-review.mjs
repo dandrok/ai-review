@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // src/run.ts
-import { existsSync as existsSync3, mkdirSync, readFileSync as readFileSync5, writeFileSync } from "node:fs";
-import { dirname, join as join3 } from "node:path";
+import { existsSync as existsSync4, mkdirSync, readFileSync as readFileSync6, writeFileSync } from "node:fs";
+import { dirname, join as join4 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/diff.ts
@@ -891,16 +891,60 @@ ${payload.comments.map((c) => `- \`${c.path}:${c.line}\` \u2014 ${c.body.split("
   return { inline: 0, fallback: true };
 }
 
+// src/env.ts
+import { existsSync as existsSync3, readFileSync as readFileSync5 } from "node:fs";
+import { join as join3 } from "node:path";
+function loadDotEnv(dirs, names = [".env", ".env.local"]) {
+  const files = [];
+  const vars = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const dir of dirs) {
+    if (!dir) continue;
+    for (const name of names) {
+      const path = join3(dir, name);
+      if (seen.has(path) || !existsSync3(path)) continue;
+      seen.add(path);
+      let text;
+      try {
+        text = readFileSync5(path, "utf8");
+      } catch {
+        continue;
+      }
+      files.push(path);
+      for (const raw of text.split("\n")) {
+        const line = raw.trim();
+        if (!line || line.startsWith("#")) continue;
+        const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+        if (!m) continue;
+        const key = m[1];
+        let value = m[2].trim();
+        const quoted = value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'");
+        if (quoted) value = value.slice(1, -1);
+        else value = value.replace(/\s+#.*$/, "").trim();
+        if (process.env[key] !== void 0) continue;
+        process.env[key] = value;
+        if (!vars.includes(key)) vars.push(key);
+      }
+    }
+  }
+  return { files, vars };
+}
+function describeEnvLoad(res) {
+  if (!res.files.length) return null;
+  const names = res.vars.length ? res.vars.join(", ") : "no new variables";
+  return `loaded ${res.files.length} env file(s) (${names})`;
+}
+
 // src/run.ts
 var HERE = dirname(fileURLToPath(import.meta.url));
 function loadPacks(root, ids) {
   const out = [];
   for (const id of ids) {
-    const local = join3(root, ".ai-review", "packs", `${id}.md`);
-    const bundled = join3(HERE, "..", "packs", `${id}.md`);
-    const p = existsSync3(local) ? local : bundled;
-    if (!existsSync3(p)) continue;
-    out.push({ id, text: readFileSync5(p, "utf8") });
+    const local = join4(root, ".ai-review", "packs", `${id}.md`);
+    const bundled = join4(HERE, "..", "packs", `${id}.md`);
+    const p = existsSync4(local) ? local : bundled;
+    if (!existsSync4(p)) continue;
+    out.push({ id, text: readFileSync6(p, "utf8") });
   }
   return out;
 }
@@ -908,7 +952,7 @@ function prFromEvent() {
   const p = process.env.GITHUB_EVENT_PATH;
   if (!p) return {};
   try {
-    const ev = JSON.parse(readFileSync5(p, "utf8"));
+    const ev = JSON.parse(readFileSync6(p, "utf8"));
     return { title: ev?.pull_request?.title, body: ev?.pull_request?.body ?? "" };
   } catch {
     return {};
@@ -976,6 +1020,7 @@ async function runReview(opts) {
     say(`  diff: ${numbered.length} chars \xB7 context: ${ctx.chars}/${fileCfg.budget_chars} chars \xB7 packs: ${packs.map((p) => p.id).join(", ")}`);
     return { exitCode: 0 };
   }
+  loadDotEnv([root]);
   const apiKey = process.env.DEEPSEEK_API_KEY || process.env.AI_REVIEW_API_KEY || "";
   if (!apiKey && !opts.mock) throw new Error("DEEPSEEK_API_KEY is not set (needed unless --mock is used)");
   const messages = buildMessages({
@@ -1014,10 +1059,10 @@ async function runReview(opts) {
     contextChars: ctx.chars,
     diffChars: numbered.length
   });
-  const artifactDir = join3(root, ".ai-review");
+  const artifactDir = join4(root, ".ai-review");
   mkdirSync(artifactDir, { recursive: true });
   writeFileSync(
-    join3(artifactDir, "last.json"),
+    join4(artifactDir, "last.json"),
     JSON.stringify(
       {
         at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -1056,14 +1101,14 @@ async function runReview(opts) {
 }
 
 // src/init.ts
-import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync6, writeFileSync as writeFileSync2, chmodSync } from "node:fs";
-import { join as join4, dirname as dirname2 } from "node:path";
+import { existsSync as existsSync5, mkdirSync as mkdirSync2, readFileSync as readFileSync7, writeFileSync as writeFileSync2, chmodSync } from "node:fs";
+import { join as join5, dirname as dirname2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var HERE2 = dirname2(fileURLToPath2(import.meta.url));
-var TEMPLATES = join4(HERE2, "..", "templates");
+var TEMPLATES = join5(HERE2, "..", "templates");
 function template(name, fallback) {
-  const p = join4(TEMPLATES, name);
-  return existsSync4(p) ? readFileSync6(p, "utf8") : fallback;
+  const p = join5(TEMPLATES, name);
+  return existsSync5(p) ? readFileSync7(p, "utf8") : fallback;
 }
 var CONFIG = `# ai-review configuration. Flat keys only.
 model: deepseek-flash
@@ -1106,13 +1151,13 @@ function selfCommand() {
 }
 function installHooks(opts) {
   const root = repoRoot();
-  const hooksDir = join4(root, ".git", "hooks");
+  const hooksDir = join5(root, ".git", "hooks");
   mkdirSync2(hooksDir, { recursive: true });
   const cmd = selfCommand();
   const written = [];
   const write = (name, body) => {
-    const p = join4(hooksDir, name);
-    if (existsSync4(p) && !readFileSync6(p, "utf8").includes("ai-review")) {
+    const p = join5(hooksDir, name);
+    if (existsSync5(p) && !readFileSync7(p, "utf8").includes("ai-review")) {
       written.push(`${name}: left untouched (existing hook that is not ai-review's)`);
       return;
     }
@@ -1124,12 +1169,37 @@ function installHooks(opts) {
   if (opts.preCommit) write("pre-commit", HOOK_PRE_COMMIT(cmd));
   return written;
 }
+var GITIGNORE_BLOCK = [
+  "# --- secrets: never commit these ---",
+  ".env",
+  ".env.*",
+  "!.env.example",
+  "!.env.sample",
+  "*.pem",
+  "*.p12",
+  "*.pfx",
+  "id_rsa*",
+  "id_ed25519*",
+  "# --- ai-review run artifacts ---",
+  ".ai-review/"
+];
+function ensureGitignore(root) {
+  const path = join5(root, ".gitignore");
+  const existing = existsSync5(path) ? readFileSync7(path, "utf8") : "";
+  const have = new Set(existing.split("\n").map((l) => l.trim()));
+  const missing = GITIGNORE_BLOCK.filter((l) => !have.has(l));
+  if (!missing.length) return [".gitignore already covers secrets"];
+  const header = existing.endsWith("\n") || !existing ? "" : "\n";
+  const body = existing + header + (existing ? "\n" : "") + missing.join("\n") + "\n";
+  writeFileSync2(path, body);
+  return [`${existing ? "updated" : "created"} .gitignore (+${missing.filter((l) => !l.startsWith("#")).length} pattern(s))`];
+}
 function initProject(opts) {
   const root = repoRoot();
   const log = [];
   const put = (rel, body) => {
-    const p = join4(root, rel);
-    if (existsSync4(p) && !opts.force) {
+    const p = join5(root, rel);
+    if (existsSync5(p) && !opts.force) {
       log.push(`${rel} exists, skipped (use --force)`);
       return;
     }
@@ -1139,14 +1209,7 @@ function initProject(opts) {
   };
   put(".ai-review.yml", CONFIG);
   if (opts.workflow) put(".github/workflows/ai-review.yml", template("review.yml", ""));
-  const gi = join4(root, ".gitignore");
-  if (existsSync4(gi)) {
-    const body = readFileSync6(gi, "utf8");
-    if (!body.includes(".ai-review/")) {
-      writeFileSync2(gi, body + "\n# ai-review run artifacts\n.ai-review/\n");
-      log.push("appended .ai-review/ to .gitignore");
-    }
-  }
+  log.push(...ensureGitignore(root));
   if (opts.hooks) log.push(...installHooks({ preCommit: false, prePush: true }).map((h) => `hook: ${h}`));
   return log;
 }
@@ -1284,6 +1347,9 @@ function parseArgs(argv) {
 }
 async function main() {
   const argv = process.argv.slice(2);
+  const envNote = describeEnvLoad(loadDotEnv([process.cwd()]));
+  if (envNote) process.stderr.write(`ai-review: ${envNote}
+`);
   if (!argv.length || argv[0] === "--help" || argv[0] === "-h") {
     console.log(HELP);
     return 0;

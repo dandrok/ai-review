@@ -378,16 +378,89 @@ function touchedSymbols(diff) {
   const stop = /* @__PURE__ */ new Set(["default", "handler", "render", "constructor", "returnv", "then", "catch"]);
   return [...names].filter((n) => n.length >= 4 && !stop.has(n)).slice(0, 10);
 }
+
+// src/env.ts
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+function loadDotEnv(dirs, names = [".env", ".env.local"]) {
+  const files = [];
+  const vars = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const dir of dirs) {
+    if (!dir) continue;
+    for (const name of names) {
+      const path = join(dir, name);
+      if (seen.has(path) || !existsSync(path)) continue;
+      seen.add(path);
+      let text;
+      try {
+        text = readFileSync(path, "utf8");
+      } catch {
+        continue;
+      }
+      files.push(path);
+      for (const raw of text.split("\n")) {
+        const line = raw.trim();
+        if (!line || line.startsWith("#")) continue;
+        const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+        if (!m) continue;
+        const key = m[1];
+        let value = m[2].trim();
+        const quoted = value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'");
+        if (quoted) value = value.slice(1, -1);
+        else value = value.replace(/\s+#.*$/, "").trim();
+        if (process.env[key] !== void 0) continue;
+        process.env[key] = value;
+        if (!vars.includes(key)) vars.push(key);
+      }
+    }
+  }
+  return { files, vars };
+}
+
+// src/init.ts
+import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, writeFileSync, chmodSync } from "node:fs";
+import { join as join2, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+var HERE = dirname(fileURLToPath(import.meta.url));
+var TEMPLATES = join2(HERE, "..", "templates");
+var GITIGNORE_BLOCK = [
+  "# --- secrets: never commit these ---",
+  ".env",
+  ".env.*",
+  "!.env.example",
+  "!.env.sample",
+  "*.pem",
+  "*.p12",
+  "*.pfx",
+  "id_rsa*",
+  "id_ed25519*",
+  "# --- ai-review run artifacts ---",
+  ".ai-review/"
+];
+function ensureGitignore(root) {
+  const path = join2(root, ".gitignore");
+  const existing = existsSync2(path) ? readFileSync2(path, "utf8") : "";
+  const have = new Set(existing.split("\n").map((l) => l.trim()));
+  const missing = GITIGNORE_BLOCK.filter((l) => !have.has(l));
+  if (!missing.length) return [".gitignore already covers secrets"];
+  const header = existing.endsWith("\n") || !existing ? "" : "\n";
+  const body = existing + header + (existing ? "\n" : "") + missing.join("\n") + "\n";
+  writeFileSync(path, body);
+  return [`${existing ? "updated" : "created"} .gitignore (+${missing.filter((l) => !l.startsWith("#")).length} pattern(s))`];
+}
 export {
   anchorLine,
   buildLineIndex,
   countBlockers,
   dedupFindings,
+  ensureGitignore,
   estimateCost,
   globToRegExp,
   groundFindings,
   ignored,
   isPeak,
+  loadDotEnv,
   numberedDiff,
   parseDiff,
   staticFindings,

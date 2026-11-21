@@ -1,5 +1,6 @@
 import { runReview, type RunOptions } from './run.ts';
 import { initProject, installHooks, selfCommand } from './init.ts';
+import { loadDotEnv, describeEnvLoad } from './env.ts';
 import type { DiffMode } from './git.ts';
 import type { Effort, FailOn } from './config.ts';
 
@@ -83,6 +84,8 @@ export function parseArgs(argv: string[]): { cmd: string; opts: RunOptions; flag
 
 async function main() {
   const argv = process.argv.slice(2);
+  const envNote = describeEnvLoad(loadDotEnv([process.cwd()]));
+  if (envNote) process.stderr.write(`ai-review: ${envNote}\n`);
   if (!argv.length || argv[0] === '--help' || argv[0] === '-h') {
     console.log(HELP);
     return 0;
