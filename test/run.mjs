@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   parseDiff, numberedDiff, groundFindings, countBlockers, validateReview,
   dedupFindings, staticFindings, globToRegExp, estimateCost, loadDotEnv, ensureGitignore,
+  toReviewPayload,
   loadDotEnvFiles, globalKeyFiles,
 } from '../dist/lib.mjs';
 
@@ -170,4 +171,33 @@ test('env: one global key file serves every repo', () => {
   // an explicit XDG root is still honoured when passed
   assert.equal(globalKeyFiles(home, '/tmp/xdg-root')[0], '/tmp/xdg-root/ai-review/env');
   delete process.env.XDG_CONFIG_HOME;
+});
+test('output: every finding is a collapsed block with a copyable agent prompt', () => {
+  const diff = parseDiff(`diff --git a/src/db.ts b/src/db.ts
+--- a/src/db.ts
++++ b/src/db.ts
+@@ -1,1 +1,2 @@
+ const q = 1;
++  const rows = await query('select * from docs where id = $1', [id]);
+`);
+  const finding = {
+    file: 'src/db.ts', start_line: 2, end_line: 2, severity: 'CRITICAL', category: 'security',
+    title: 'Missing <tenant> scope', rationale: 'No tenant_id predicate, unlike loadDoc.', suggestion: 'Add `and tenant_id = $2`.',
+    id: 'security-1-db.ts:2',
+  };
+  const payload = toReviewPayload({
+    findings: [finding], droppedCount: 0, diff, agent: 'security+correctness', failOn: 'critical',
+    summary: 's', model: 'm', costUsd: 0, gate: true, contextChars: 0, diffChars: 0,
+  });
+  const c = payload.comments[0].body;
+  assert.match(c, /<details>/);
+  assert.match(c, /<summary>\S+ <b>Missing &lt;tenant&gt; scope<\/b>/);   // html-escaped title
+  assert.match(c, /```text/);
+  assert.match(c, /location: src\/db\.ts:2/);
+  assert.match(c, /<!-- ai-review:v1 \{.*"file":"src\/db\.ts"/);
+  // counts as one markdown <details> per finding, all correctly closed
+  assert.equal((c.match(/<details>/g) || []).length, 1);
+  assert.equal((c.match(/<\/details>/g) || []).length, 1);
+  // the summary body has the expand-all wrapper
+  assert.match(payload.body, /Expand all 1 finding\(s\)/);
 });

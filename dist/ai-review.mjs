@@ -779,8 +779,26 @@ var ICON = { CRITICAL: "\u{1F534}", WARNING: "\u{1F7E1}", SUGGESTION: "\u{1F535}
 function countBlockers(findings, failOn) {
   return findings.filter((f) => (RANK2[f.severity] ?? 0) >= MIN[failOn]).length;
 }
-function commentBody(f, agent) {
-  const payload = JSON.stringify({
+function agentPrompt(f) {
+  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
+  const oneLine = (s) => s.replace(/\s+/g, " ").trim();
+  return [
+    `Fix this code review finding.`,
+    ``,
+    `severity: ${f.severity.toLowerCase()}`,
+    `category: ${f.category}`,
+    `location: ${range}`,
+    `problem: ${f.title}`,
+    `why: ${oneLine(f.rationale)}`,
+    f.suggestion ? `suggested fix: ${oneLine(f.suggestion)}` : "",
+    `id: ${f.id}`,
+    ``,
+    `Re-read the surrounding code before editing, change the smallest thing that fixes the`,
+    `root cause, and do not touch anything unrelated.`
+  ].filter((l) => l !== "").join("\n");
+}
+function payloadFor(f) {
+  return JSON.stringify({
     v: 1,
     id: f.id,
     rule: f.category,
@@ -789,15 +807,33 @@ function commentBody(f, agent) {
     line: f.start_line,
     end_line: f.end_line
   });
+}
+function detailsBlock(f, agent, open = false) {
+  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
   return [
-    `${ICON[f.severity]} **${f.title}** (${f.severity.toLowerCase()} \xB7 ${f.category} \xB7 ${agent})`,
+    `<details${open ? " open" : ""}>`,
+    `<summary>${ICON[f.severity]} <b>${escapeHtml(f.title)}</b> \u2014 <code>${range}</code></summary>`,
     "",
     f.rationale,
-    f.suggestion ? `
-**Fix:** ${f.suggestion}` : "",
     "",
-    `<!-- ai-review:v1 ${payload} -->`
-  ].filter((l) => l !== "").join("\n");
+    f.suggestion ? `**Fix:** ${f.suggestion}` : "",
+    "",
+    "**Paste into your agent:**",
+    "",
+    "```text",
+    agentPrompt(f),
+    "```",
+    "",
+    "</details>"
+  ].join("\n");
+}
+var escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function commentBody(f, agent) {
+  return [
+    detailsBlock(f, agent),
+    "",
+    `<!-- ai-review:v1 ${payloadFor(f)} -->`
+  ].join("\n");
 }
 function toReviewPayload(opts) {
   const blockers = countBlockers(opts.findings, opts.failOn);
@@ -811,7 +847,13 @@ function toReviewPayload(opts) {
   const table = opts.findings.length > 0 ? [
     "| Sev | Finding | Where |",
     "|---|---|---|",
-    ...opts.findings.map((f) => `| ${ICON[f.severity]} ${f.severity.toLowerCase()} | ${f.title} | \`${f.file}:${f.start_line}\` |`)
+    ...opts.findings.map((f) => `| ${ICON[f.severity]} ${f.severity.toLowerCase()} | ${f.title} | \`${f.file}:${f.start_line}\` |`),
+    "",
+    `<details><summary>Expand all ${opts.findings.length} finding(s) \u2014 each has a copyable block</summary>`,
+    "",
+    ...opts.findings.map((f) => detailsBlock(f, opts.agent)),
+    "",
+    "</details>"
   ].join("\n") : "_Nothing worth flagging on this diff._";
   const footer = [
     `_${opts.model} \xB7 ${opts.findings.length} kept, ${opts.droppedCount} dropped as ungrounded \xB7 ${opts.contextChars} ctx + ${opts.diffChars} diff chars \xB7 $${opts.costUsd.toFixed(4)}_`,

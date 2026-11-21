@@ -12,8 +12,29 @@ export function countBlockers(findings: Finding[], failOn: FailOn): number {
   return findings.filter((f) => (RANK[f.severity] ?? 0) >= MIN[failOn]).length;
 }
 
-export function commentBody(f: Finding, agent: string): string {
-  const payload = JSON.stringify({
+export function agentPrompt(f: Finding): string {
+  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
+  const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim();
+  return [
+    `Fix this code review finding.`,
+    ``,
+    `severity: ${f.severity.toLowerCase()}`,
+    `category: ${f.category}`,
+    `location: ${range}`,
+    `problem: ${f.title}`,
+    `why: ${oneLine(f.rationale)}`,
+    f.suggestion ? `suggested fix: ${oneLine(f.suggestion)}` : '',
+    `id: ${f.id}`,
+    ``,
+    `Re-read the surrounding code before editing, change the smallest thing that fixes the`,
+    `root cause, and do not touch anything unrelated.`,
+  ]
+    .filter((l) => l !== '')
+    .join('\n');
+}
+
+function payloadFor(f: Finding): string {
+  return JSON.stringify({
     v: 1,
     id: f.id,
     rule: f.category,
@@ -22,16 +43,38 @@ export function commentBody(f: Finding, agent: string): string {
     line: f.start_line,
     end_line: f.end_line,
   });
+}
+
+/** Collapsed by default so a review reads as a list; GitHub puts a copy button on the fence. */
+export function detailsBlock(f: Finding, agent: string, open = false): string {
+  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
   return [
-    `${ICON[f.severity]} **${f.title}** (${f.severity.toLowerCase()} · ${f.category} · ${agent})`,
+    `<details${open ? ' open' : ''}>`,
+    `<summary>${ICON[f.severity]} <b>${escapeHtml(f.title)}</b> — <code>${range}</code></summary>`,
     '',
     f.rationale,
-    f.suggestion ? `\n**Fix:** ${f.suggestion}` : '',
     '',
-    `<!-- ai-review:v1 ${payload} -->`,
-  ]
-    .filter((l) => l !== '')
-    .join('\n');
+    f.suggestion ? `**Fix:** ${f.suggestion}` : '',
+    '',
+    '**Paste into your agent:**',
+    '',
+    '```text',
+    agentPrompt(f),
+    '```',
+    '',
+    '</details>',
+  ].join('\n');
+}
+
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+export function commentBody(f: Finding, agent: string): string {
+  return [
+    detailsBlock(f, agent),
+    '',
+    `<!-- ai-review:v1 ${payloadFor(f)} -->`,
+  ].join('\n');
 }
 
 export interface ReviewPayload {
@@ -75,6 +118,12 @@ export function toReviewPayload(opts: {
           '| Sev | Finding | Where |',
           '|---|---|---|',
           ...opts.findings.map((f) => `| ${ICON[f.severity]} ${f.severity.toLowerCase()} | ${f.title} | \`${f.file}:${f.start_line}\` |`),
+          '',
+          `<details><summary>Expand all ${opts.findings.length} finding(s) — each has a copyable block</summary>`,
+          '',
+          ...opts.findings.map((f) => detailsBlock(f, opts.agent)),
+          '',
+          '</details>',
         ].join('\n')
       : '_Nothing worth flagging on this diff._';
 
