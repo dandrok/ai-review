@@ -59,7 +59,12 @@ function readUsage(json: any): Usage {
   return { prompt_tokens: prompt, completion_tokens: Number(u.completion_tokens ?? 0), cache_hit_tokens: hit, cache_miss_tokens: miss };
 }
 
-async function post(opts: LlmOptions, messages: { role: string; content: string }[], extra: { role: string; content: string }[]) {
+async function post(
+  opts: LlmOptions,
+  messages: { role: string; content: string }[],
+  extra: { role: string; content: string }[],
+  effort: Effort,
+) {
   const body: Record<string, unknown> = {
     model: opts.model,
     messages: [...messages, ...extra],
@@ -67,10 +72,10 @@ async function post(opts: LlmOptions, messages: { role: string; content: string 
     max_tokens: opts.maxTokens,
     stream: false,
   };
-  if (opts.effort === 'none') body.thinking = { type: 'disabled' };
+  if (effort === 'none') body.thinking = { type: 'disabled' };
   else {
     body.thinking = { type: 'enabled' };
-    body.reasoning_effort = opts.effort;
+    body.reasoning_effort = effort;
   }
   const res = await fetch(`${opts.baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
@@ -91,10 +96,14 @@ export async function callModel(messages: { role: 'system' | 'user' | 'assistant
 
   const extra: { role: string; content: string }[] = [];
   let lastErrors: string[] = [];
+  // Thinking costs output tokens. When the budget runs out mid-reasoning the model
+  // returns empty content, so a retry with the same settings is useless — turn
+  // thinking off after the first failure and keep the answer.
+  let effort: Effort = opts.effort;
   for (let attempt = 1; attempt <= 3; attempt++) {
     let json: any;
     try {
-      json = await post(opts, messages as any, extra);
+      json = await post(opts, messages as any, extra, effort);
     } catch (e: any) {
       const status = e?.status as number | undefined;
       if (attempt < 3 && (status === 429 || status === 503 || status === 500)) {
@@ -106,11 +115,14 @@ export async function callModel(messages: { role: 'system' | 'user' | 'assistant
     }
     const content: string = json?.choices?.[0]?.message?.content ?? '';
     const usage = readUsage(json);
+    const finish = String(json?.choices?.[0]?.finish_reason ?? 'unknown');
     if (!content.trim()) {
-      lastErrors = ['empty response (model returned no JSON)'];
+      const reasoning = String(json?.choices?.[0]?.message?.reasoning_content ?? '').length;
+      lastErrors = [`empty response (finish_reason=${finish}, reasoning=${reasoning} chars, completion_tokens=${usage.completion_tokens})`];
       extra.length = 0;
       extra.push({ role: 'user', content: 'Your reply was empty. Reply with the JSON object only, no prose and no markdown fence.' });
-      opts.onRetry?.('empty response, retrying');
+      effort = 'none';
+      opts.onRetry?.(lastErrors[0]);
       continue;
     }
     let parsed: unknown;

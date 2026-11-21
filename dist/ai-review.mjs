@@ -221,6 +221,7 @@ var DEFAULTS = {
   fail_on: "critical",
   max_findings: 8,
   budget_chars: 6e4,
+  max_output_tokens: 16e3,
   packs: ["security", "correctness", "performance"],
   ignore: ["**/*.md", "**/*.lock", "**/package-lock.json", "**/dist/**", "**/node_modules/**"],
   language: "",
@@ -266,6 +267,8 @@ function loadConfig(root, overrides = {}) {
   if (mf !== void 0) cfg.max_findings = mf;
   const bc = num(parsed.budget_chars);
   if (bc !== void 0) cfg.budget_chars = bc;
+  const mo = num(parsed.max_output_tokens);
+  if (mo !== void 0) cfg.max_output_tokens = mo;
   if (Array.isArray(parsed.packs)) cfg.packs = parsed.packs;
   if (Array.isArray(parsed.ignore)) cfg.ignore = parsed.ignore;
   if (process.env.AI_REVIEW_MODEL) cfg.model = process.env.AI_REVIEW_MODEL;
@@ -622,7 +625,7 @@ function readUsage(json) {
   const miss = Number(u.prompt_cache_miss_tokens ?? Math.max(0, prompt - hit));
   return { prompt_tokens: prompt, completion_tokens: Number(u.completion_tokens ?? 0), cache_hit_tokens: hit, cache_miss_tokens: miss };
 }
-async function post(opts, messages, extra) {
+async function post(opts, messages, extra, effort) {
   const body = {
     model: opts.model,
     messages: [...messages, ...extra],
@@ -630,10 +633,10 @@ async function post(opts, messages, extra) {
     max_tokens: opts.maxTokens,
     stream: false
   };
-  if (opts.effort === "none") body.thinking = { type: "disabled" };
+  if (effort === "none") body.thinking = { type: "disabled" };
   else {
     body.thinking = { type: "enabled" };
-    body.reasoning_effort = opts.effort;
+    body.reasoning_effort = effort;
   }
   const res = await fetch(`${opts.baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
@@ -652,10 +655,11 @@ async function callModel(messages, opts) {
   }
   const extra = [];
   let lastErrors = [];
+  let effort = opts.effort;
   for (let attempt = 1; attempt <= 3; attempt++) {
     let json;
     try {
-      json = await post(opts, messages, extra);
+      json = await post(opts, messages, extra, effort);
     } catch (e) {
       const status = e?.status;
       if (attempt < 3 && (status === 429 || status === 503 || status === 500)) {
@@ -667,11 +671,14 @@ async function callModel(messages, opts) {
     }
     const content = json?.choices?.[0]?.message?.content ?? "";
     const usage = readUsage(json);
+    const finish = String(json?.choices?.[0]?.finish_reason ?? "unknown");
     if (!content.trim()) {
-      lastErrors = ["empty response (model returned no JSON)"];
+      const reasoning = String(json?.choices?.[0]?.message?.reasoning_content ?? "").length;
+      lastErrors = [`empty response (finish_reason=${finish}, reasoning=${reasoning} chars, completion_tokens=${usage.completion_tokens})`];
       extra.length = 0;
       extra.push({ role: "user", content: "Your reply was empty. Reply with the JSON object only, no prose and no markdown fence." });
-      opts.onRetry?.("empty response, retrying");
+      effort = "none";
+      opts.onRetry?.(lastErrors[0]);
       continue;
     }
     let parsed;
@@ -1047,7 +1054,7 @@ async function runReview(opts) {
     model: fileCfg.model,
     baseUrl: process.env.AI_REVIEW_BASE_URL || "https://api.deepseek.com",
     effort: fileCfg.effort,
-    maxTokens: 6e3,
+    maxTokens: fileCfg.max_output_tokens,
     mockPath: opts.mock,
     onRetry: (note) => say(`ai-review: retry (${note})`)
   });

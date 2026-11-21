@@ -12,6 +12,8 @@ export interface Config {
   fail_on: FailOn;
   max_findings: number;
   budget_chars: number;
+  /** output token budget for one call; thinking tokens are spent from it too */
+  max_output_tokens: number;
   packs: string[];
   ignore: string[];
   /** free-text hint about the stack; '' = let the model infer */
@@ -26,6 +28,7 @@ export const DEFAULTS: Config = {
   fail_on: 'critical',
   max_findings: 8,
   budget_chars: 60_000,
+  max_output_tokens: 16_000,
   packs: ['security', 'correctness', 'performance'],
   ignore: ['**/*.md', '**/*.lock', '**/package-lock.json', '**/dist/**', '**/node_modules/**'],
   language: '',
@@ -75,6 +78,8 @@ export function loadConfig(root: string, overrides: Partial<Config> = {}): { con
   if (mf !== undefined) cfg.max_findings = mf;
   const bc = num(parsed.budget_chars);
   if (bc !== undefined) cfg.budget_chars = bc;
+  const mo = num(parsed.max_output_tokens);
+  if (mo !== undefined) cfg.max_output_tokens = mo;
   if (Array.isArray(parsed.packs)) cfg.packs = parsed.packs;
   if (Array.isArray(parsed.ignore)) cfg.ignore = parsed.ignore;
 

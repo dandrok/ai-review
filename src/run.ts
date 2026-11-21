@@ -137,7 +137,7 @@ export async function runReview(opts: RunOptions): Promise<{ exitCode: number }>
     model: fileCfg.model,
     baseUrl: process.env.AI_REVIEW_BASE_URL || 'https://api.deepseek.com',
     effort: fileCfg.effort,
-    maxTokens: 6000,
+    maxTokens: fileCfg.max_output_tokens,
     mockPath: opts.mock,
     onRetry: (note) => say(`ai-review: retry (${note})`),
   });
