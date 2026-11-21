@@ -66,6 +66,24 @@ export function detailsBlock(f: Finding, agent: string, open = false): string {
   ].join('\n');
 }
 
+/** Flat rendering for the summary's expand-all: nested <details> would only reveal more folded blocks. */
+export function plainBlock(f: Finding): string {
+  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
+  return [
+    `#### ${ICON[f.severity]} ${escapeHtml(f.title)} — \`${range}\``,
+    '',
+    f.rationale,
+    '',
+    f.suggestion ? `**Fix:** ${f.suggestion}` : '',
+    '',
+    '```text',
+    agentPrompt(f),
+    '```',
+    '',
+    '---',
+  ].join('\n');
+}
+
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -119,9 +137,9 @@ export function toReviewPayload(opts: {
           '|---|---|---|',
           ...opts.findings.map((f) => `| ${ICON[f.severity]} ${f.severity.toLowerCase()} | ${f.title} | \`${f.file}:${f.start_line}\` |`),
           '',
-          `<details><summary>Expand all ${opts.findings.length} finding(s) — each has a copyable block</summary>`,
+          `<details><summary>Expand all ${opts.findings.length} finding(s) — every one has a copyable block</summary>`,
           '',
-          ...opts.findings.map((f) => detailsBlock(f, opts.agent)),
+          ...opts.findings.map((f) => plainBlock(f)),
           '',
           '</details>',
         ].join('\n')

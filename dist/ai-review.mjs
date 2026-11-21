@@ -827,6 +827,22 @@ function detailsBlock(f, agent, open = false) {
     "</details>"
   ].join("\n");
 }
+function plainBlock(f) {
+  const range = f.end_line !== f.start_line ? `${f.file}:${f.start_line}-${f.end_line}` : `${f.file}:${f.start_line}`;
+  return [
+    `#### ${ICON[f.severity]} ${escapeHtml(f.title)} \u2014 \`${range}\``,
+    "",
+    f.rationale,
+    "",
+    f.suggestion ? `**Fix:** ${f.suggestion}` : "",
+    "",
+    "```text",
+    agentPrompt(f),
+    "```",
+    "",
+    "---"
+  ].join("\n");
+}
 var escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function commentBody(f, agent) {
   return [
@@ -849,9 +865,9 @@ function toReviewPayload(opts) {
     "|---|---|---|",
     ...opts.findings.map((f) => `| ${ICON[f.severity]} ${f.severity.toLowerCase()} | ${f.title} | \`${f.file}:${f.start_line}\` |`),
     "",
-    `<details><summary>Expand all ${opts.findings.length} finding(s) \u2014 each has a copyable block</summary>`,
+    `<details><summary>Expand all ${opts.findings.length} finding(s) \u2014 every one has a copyable block</summary>`,
     "",
-    ...opts.findings.map((f) => detailsBlock(f, opts.agent)),
+    ...opts.findings.map((f) => plainBlock(f)),
     "",
     "</details>"
   ].join("\n") : "_Nothing worth flagging on this diff._";
