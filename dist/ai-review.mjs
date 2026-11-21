@@ -1288,6 +1288,10 @@ async function main() {
     console.log(HELP);
     return 0;
   }
+  if (argv[0] === "--version" || argv[0] === "-v") {
+    console.log(VERSION);
+    return 0;
+  }
   const { cmd, opts, flags } = parseArgs(argv);
   if (flags.version) {
     console.log(VERSION);
