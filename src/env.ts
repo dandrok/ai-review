@@ -58,10 +58,14 @@ export function loadDotEnv(dirs: string[], names = ['.env', '.env.local']): { fi
  * $XDG_CONFIG_HOME/ai-review/env, ~/.config/ai-review/env, or ~/.ai-review.env.
  * Loaded after the project files, so a project .env still wins.
  */
-export function globalKeyFiles(home = process.env.HOME ?? ''): string[] {
-  if (!home) return [];
-  const xdg = process.env.XDG_CONFIG_HOME || join(home, '.config');
-  return [join(xdg, 'ai-review', 'env'), join(home, '.ai-review.env')];
+export function globalKeyFiles(home?: string, xdgConfigHome?: string): string[] {
+  const h = home ?? process.env.HOME ?? '';
+  if (!h) return [];
+  // An explicit home (tests, or a caller pinning a user) must not be overridden by the
+  // ambient XDG_CONFIG_HOME: CI runners set it, which made this resolve outside the home.
+  const x = xdgConfigHome ?? (home === undefined ? process.env.XDG_CONFIG_HOME ?? '' : '');
+  const configDir = x || join(h, '.config');
+  return [join(configDir, 'ai-review', 'env'), join(h, '.ai-review.env')];
 }
 
 /**

@@ -157,6 +157,8 @@ test('gitignore: creates the secrets block once, then leaves it alone', () => {
 });
 test('env: one global key file serves every repo', () => {
   const home = mkdtempSync(join(tmpdir(), 'ai-review-home-'));
+  // CI runners export XDG_CONFIG_HOME; an explicit home must still win.
+  process.env.XDG_CONFIG_HOME = '/tmp/not-this-home';
   mkdirSync(join(home, '.config', 'ai-review'), { recursive: true });
   writeFileSync(join(home, '.config', 'ai-review', 'env'), 'AI_REVIEW_GLOBAL_KEY=from-global\n');
   const paths = globalKeyFiles(home);
@@ -165,4 +167,7 @@ test('env: one global key file serves every repo', () => {
   const res = loadDotEnvFiles(paths);
   assert.equal(process.env.AI_REVIEW_GLOBAL_KEY, 'from-global');
   assert.equal(res.files.length, 1);
+  // an explicit XDG root is still honoured when passed
+  assert.equal(globalKeyFiles(home, '/tmp/xdg-root')[0], '/tmp/xdg-root/ai-review/env');
+  delete process.env.XDG_CONFIG_HOME;
 });
