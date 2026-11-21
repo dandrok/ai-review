@@ -128,15 +128,37 @@ Nothing here uses an AST, an embedding, or a language server. See [Any language,
 
 One review, one inline comment per finding, anchored on a line that exists in the diff:
 
-> 🔴 **Missing tenant scope on export** (critical · security · security+correctness)
+Each finding is collapsed, so a review reads as a list before it reads as an essay:
+
+> <details>
+> <summary>🔴 <b>Missing tenant scope on export</b> — <code>src/export.ts:5</code></summary>
 >
-> `src/export.ts:5` — `where id = $1` has no `tenant_id` predicate, unlike `loadDoc` in `src/docs.ts`, so any authenticated user can export another tenant's document.
+> `where id = $1` has no `tenant_id` predicate, unlike `loadDoc` in `src/docs.ts`, so any authenticated user can export another tenant's document.
 >
 > **Fix:** Add `and tenant_id = $2` and pass the session tenant.
 >
+> **Paste into your agent:**
+>
+> ```text
+> Fix this code review finding.
+> severity: critical
+> category: security
+> location: src/export.ts:5
+> problem: Missing tenant scope on export
+> why: `where id = $1` has no tenant_id predicate, unlike loadDoc in src/docs.ts …
+> suggested fix: Add `and tenant_id = $2` and pass the session tenant.
+> id: security-2-export.ts:5
+> ```
+>
+> </details>
+>
 > `<!-- ai-review:v1 {"v":1,"id":"security-2-export.ts:5","rule":"security","severity":"CRITICAL","file":"src/export.ts","line":5} -->`
 
-The trailing HTML comment is invisible in the GitHub UI and is the hook for the next feature: an agent can fetch the PR comments, read the payload, and apply the fix. `ai-review` itself never writes code.
+GitHub sanitises HTML in comments, so there is no way to ship a real `<button>` — but **every fenced code block gets a copy button in the top-right corner**, which is the same affordance with no JavaScript and no extension. The `text` fence is the finding restated as an instruction: paste it into Claude Code, Codex, Antigravity, anything, and it has the file, the line, the reason and the intended fix.
+
+The `<!-- ai-review:v1 … -->` comment stays invisible and is the machine-readable door for a future `--fix` mode. `ai-review` itself never writes code.
+
+The summary comment carries a severity table, an **"Expand all"** wrapper over the same blocks (one click lists everything without scrolling a diff), the count of findings dropped as ungrounded, the token/cost line, and the note that a human still merges.
 
 The summary comment carries a severity table, the count of findings dropped as ungrounded, the token/cost line, and the note that a human still merges.
 
