@@ -43,3 +43,17 @@ jobs:
 
       - name: publish
         run: npm publish --provenance --access public --loglevel verbose
+
+      - name: verify the version is actually live
+        # npm can exit 0 after staging a release instead of publishing it (staged publishing
+        # is always allowed for a trusted publisher; direct publish has to be ticked too).
+        # Without this check a staged release looks like a green build and ships nothing.
+        run: |
+          ver="$(node -p "require('./package.json').version")"
+          for i in $(seq 1 10); do
+            live="$(npm view "@dandrok/ai-review@$ver" version 2>/dev/null || true)"
+            if [ -n "$live" ]; then echo "live on the registry: $live"; exit 0; fi
+            sleep 6
+          done
+          echo "::error::$ver is not on the registry. If it was staged, approve it (npm stage approve) or allow 'npm publish' on the trusted publisher."
+          exit 1
