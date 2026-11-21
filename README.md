@@ -163,7 +163,7 @@ ai-review install-hooks [--pre-commit] [--pre-push]
 | `--mock <file>` | replay a JSON review, no network (used by the test suite) |
 | `--fail-on` | `never` \| `critical` \| `warning` \| `any` (default `critical`) |
 | `--effort` | `none` \| `low` \| `high` \| `max` (default `high`; `low` for pre-push) |
-| `--packs` | `security,correctness,performance,spec` |
+| `--packs` | `security,correctness,performance,spec` (default: the first three) |
 | `--format` | `terminal` \| `json` \| `markdown` |
 | `--post` / `--no-post` | post as a GitHub PR review when CI env vars are present |
 
@@ -218,7 +218,7 @@ effort: high          # none | low | high | max
 fail_on: critical     # never | critical | warning | any
 max_findings: 8
 budget_chars: 60000
-packs: [security, correctness]
+packs: [security, correctness, performance]
 ignore: ["**/*.md", "**/*.lock", "**/dist/**"]
 post: true
 ```

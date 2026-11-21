@@ -26,7 +26,7 @@ export const DEFAULTS: Config = {
   fail_on: 'critical',
   max_findings: 8,
   budget_chars: 60_000,
-  packs: ['security', 'correctness'],
+  packs: ['security', 'correctness', 'performance'],
   ignore: ['**/*.md', '**/*.lock', '**/package-lock.json', '**/dist/**', '**/node_modules/**'],
   language: '',
   post: true,

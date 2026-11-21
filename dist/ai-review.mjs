@@ -221,7 +221,7 @@ var DEFAULTS = {
   fail_on: "critical",
   max_findings: 8,
   budget_chars: 6e4,
-  packs: ["security", "correctness"],
+  packs: ["security", "correctness", "performance"],
   ignore: ["**/*.md", "**/*.lock", "**/package-lock.json", "**/dist/**", "**/node_modules/**"],
   language: "",
   post: true
@@ -1129,7 +1129,7 @@ fail_on: critical
 max_findings: 8
 # characters of repository context on top of the diff (~4 chars per token)
 budget_chars: 60000
-packs: [security, correctness]
+packs: [security, correctness, performance]
 ignore: ["**/*.md", "**/*.lock", "**/package-lock.json", "**/dist/**", "**/node_modules/**"]
 post: true
 `;

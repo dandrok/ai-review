@@ -4,6 +4,6 @@ effort: high          # none | low | high | max — low is ~3x faster for pre-pu
 fail_on: critical     # never | critical | warning | any
 max_findings: 8
 budget_chars: 60000
-packs: [security, correctness]
+packs: [security, correctness, performance]
 ignore: ["**/*.md", "**/*.lock", "**/package-lock.json", "**/dist/**", "**/node_modules/**"]
 post: true
