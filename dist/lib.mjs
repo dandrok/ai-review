@@ -423,10 +423,12 @@ function loadDotEnv(dirs, names = [".env", ".env.local"]) {
   }
   return loadDotEnvFiles(paths);
 }
-function globalKeyFiles(home = process.env.HOME ?? "") {
-  if (!home) return [];
-  const xdg = process.env.XDG_CONFIG_HOME || join(home, ".config");
-  return [join(xdg, "ai-review", "env"), join(home, ".ai-review.env")];
+function globalKeyFiles(home, xdgConfigHome) {
+  const h = home ?? process.env.HOME ?? "";
+  if (!h) return [];
+  const x = xdgConfigHome ?? (home === void 0 ? process.env.XDG_CONFIG_HOME ?? "" : "");
+  const configDir = x || join(h, ".config");
+  return [join(configDir, "ai-review", "env"), join(h, ".ai-review.env")];
 }
 function loadEnv(cwd, toolDir = "") {
   const paths = [join(cwd, ".env"), join(cwd, ".env.local"), ...globalKeyFiles()];
