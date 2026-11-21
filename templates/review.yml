@@ -1,0 +1,30 @@
+# AI review on every pull request. Comment-only by default: fail_on decides the gate.
+name: ai-review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the base branch must be present for the diff
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: ai-review
+        run: npx -y @dandrok/ai-review@latest review --base origin/${{ github.base_ref }} --post
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

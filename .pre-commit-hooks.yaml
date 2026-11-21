@@ -1,0 +1,13 @@
+- id: ai-review
+  name: ai-review (secrets scan on staged lines)
+  entry: ai-review review --staged --static-only --quiet
+  language: node
+  pass_filenames: false
+  always_run: true
+- id: ai-review-deep
+  name: ai-review (full review vs base branch)
+  entry: ai-review review --base origin/HEAD --fail-on critical --effort low
+  language: node
+  pass_filenames: false
+  always_run: true
+  stages: [pre-push]

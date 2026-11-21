@@ -1,0 +1,43 @@
+{
+  "name": "@dandrok/ai-review",
+  "version": "0.1.0",
+  "description": "Lightweight, diff-grounded AI code review for any git repo. One cheap model, inline PR comments, no server.",
+  "type": "module",
+  "bin": {
+    "ai-review": "dist/ai-review.mjs"
+  },
+  "files": [
+    "dist",
+    "packs",
+    "templates",
+    ".pre-commit-hooks.yaml",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/run.mjs",
+    "review": "node dist/ai-review.mjs review"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.9.3"
+  },
+  "keywords": [
+    "code-review",
+    "ai",
+    "git",
+    "pull-request",
+    "static-analysis"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dandrok/ai-review.git"
+  },
+  "author": "dandrok <46764643+dandrok@users.noreply.github.com>",
+  "license": "MIT"
+}

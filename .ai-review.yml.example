@@ -1,0 +1,9 @@
+# Copy to .ai-review.yml (or run `npx @dandrok/ai-review init`). Flat keys only.
+model: deepseek-flash
+effort: high          # none | low | high | max — low is ~3x faster for pre-push
+fail_on: critical     # never | critical | warning | any
+max_findings: 8
+budget_chars: 60000
+packs: [security, correctness]
+ignore: ["**/*.md", "**/*.lock", "**/package-lock.json", "**/dist/**", "**/node_modules/**"]
+post: true
