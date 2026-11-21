@@ -1,6 +1,6 @@
 {
   "name": "@dandrok/ai-review",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Lightweight, diff-grounded AI code review for any git repo. One cheap model, inline PR comments, no server.",
   "type": "module",
   "bin": {
