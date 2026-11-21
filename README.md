@@ -296,11 +296,13 @@ Publishing runs from a tag, with no long-lived npm token: `.github/workflows/rel
 One-time setup, in this order:
 
 1. `npm login` locally, and confirm your npm username owns the scope (`npm whoami` → must be `dandrok`, or the package has to be renamed to `@<your-npm-username>/ai-review`).
-2. The first publish must be manual — Trusted Publishing is configured on an existing package's settings page:
+2. The first publish must be manual — Trusted Publishing is configured on an existing package's settings page, and provenance cannot be generated outside CI:
 
    ```bash
-   npm publish --access public
+   npm publish --access public          # no --provenance here: there is no CI provider to attest
    ```
+
+   Provenance is enabled on the release workflow's command instead (`.github/workflows/release.yml`), never in `publishConfig`, because a `publishConfig.provenance: true` makes *every* publish — including a local one — fail with `Automatic provenance generation not supported for provider: null`.
 
 3. On npmjs.com → the package → **Settings → Trusted Publisher** → GitHub Actions: user `dandrok`, repository `ai-review`, workflow `release.yml`. Leave the environment empty unless you use one.
 4. Enable 2FA on the npm account.

@@ -41,7 +41,6 @@
   "author": "dandrok <46764643+dandrok@users.noreply.github.com>",
   "license": "MIT",
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   }
 }
