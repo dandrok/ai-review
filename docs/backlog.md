@@ -81,7 +81,23 @@ before posting, and named in the summary ("2 accepted, not shown").
 whose id was already commented on the PR. Inline comments only for findings that are new
 since the last review.
 
-## 8. Deferred from the tool's own reviews
+## 8. Ship `fail_on: never` as the default
+
+**Status:** open, follows from decisions #1 and #7.
+**Evidence:** `DEFAULTS.fail_on` and the config `init` writes both say `critical`, while
+every adopted repo ends up setting `never` by hand.
+**Done:** the generated config defaults to `never` with a comment explaining what would
+justify turning it on.
+
+## 9. Packs as a portable agent skill
+
+**Status:** open, follows from decision #6.
+**Evidence:** the packs are the only non-replaceable part, and they are currently only
+reachable through this CLI.
+**Done:** a `skill/` bundle (SKILL.md + the four packs) that Claude Code / Codex /
+Antigravity can load directly, generated from `packs/` so there is one source of truth.
+
+## 10. Deferred from the tool's own reviews
 
 - Post the review from a job that does not execute the package (raises the bar for a
   compromised release; needs an artifact hand-off between jobs).
