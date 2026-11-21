@@ -30,5 +30,16 @@ jobs:
           ver="$(node -p "require('./package.json').version")"
           echo "tag=$tag package=$ver"
           [ "$tag" = "$ver" ] || { echo "::error::tag v$tag does not match package.json $ver"; exit 1; }
+      - name: diagnose OIDC
+        # If this prints "none", the job has no id-token and npm will silently fall back
+        # to token auth (which fails as ENEEDAUTH). If it prints "present", the OIDC
+        # endpoint is fine and the failure is on the npmjs.com Trusted Publisher config:
+        # wrong workflow filename, an Environment name that this workflow does not declare,
+        # or "npm publish" not among the allowed actions.
+        run: |
+          echo "npm $(npm -v) / node $(node -v)"
+          echo "OIDC env: $([ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && echo present || echo none)"
+          echo "actor: $GITHUB_ACTOR  ref: $GITHUB_REF  repo: $GITHUB_REPOSITORY"
+
       - name: publish
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --loglevel verbose
