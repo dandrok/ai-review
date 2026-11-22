@@ -10,7 +10,6 @@
     "dist",
     "packs",
     "templates",
-    ".pre-commit-hooks.yaml",
     "README.md"
   ],
   "engines": {
@@ -18,6 +17,7 @@
   },
   "scripts": {
     "build": "node build.mjs",
+    "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/run.mjs",
     "review": "node dist/ai-review.mjs review"

@@ -102,3 +102,20 @@ Antigravity can load directly, generated from `packs/` so there is one source of
 - Post the review from a job that does not execute the package (raises the bar for a
   compromised release; needs an artifact hand-off between jobs).
 - Pin the version in CI instead of `@latest` (one line, accepted risk for now).
+
+## 11. Publish the Docker image to GHCR
+
+**Status:** maybe. Not scheduled, and deliberately not a yes.
+**Why it is not done:** the Docker lane currently needs `git clone` + `docker build`, so it
+only helps someone who already has this repo. `ghcr.io/dandrok/ai-review` would reduce
+that to one `docker run`, which is the difference between a lane and a real install path.
+But while the only user builds from a clone, a registry buys nothing and adds something to
+keep in sync: a tag per release, plus a `latest` that can silently point at an old build.
+**Why it is not simply deleted either:** the Docker lane is the only path for a machine
+with no Node, and the Dockerfile now builds from `src/` instead of a committed `dist/`,
+so it is correct rather than merely present.
+**Done (if it ever matters):** `release.yml` pushes `ghcr.io/dandrok/ai-review:<tag>` and
+`:latest` using the existing `GITHUB_TOKEN` with `permissions: packages: write` — no PAT,
+no new secret — plus a `workflow_dispatch` trigger so the first push happens in CI and
+never needs a laptop login. Package visibility must then be flipped to public by hand, or
+an unauthenticated `docker run` fails for strangers.

@@ -120,6 +120,8 @@ export function initProject(opts: { force: boolean; hooks: boolean; workflow: bo
   put('.ai-review.yml', CONFIG);
   if (opts.workflow) put('.github/workflows/ai-review.yml', template('review.yml', ''));
   log.push(...ensureGitignore(root));
-  if (opts.hooks) log.push(...installHooks({ preCommit: false, prePush: true }).map((h) => `hook: ${h}`));
+  // Both hooks: the commit-time one is the free offline secrets scan, the push-time one
+  // is the paid review. Installing only pre-push left the <1s scan unreachable.
+  if (opts.hooks) log.push(...installHooks({ preCommit: true, prePush: true }).map((h) => `hook: ${h}`));
   return log;
 }
