@@ -103,11 +103,3 @@ export function buildLineIndex(d: UnifiedDiff): Map<string, Set<number>> {
   }
   return index;
 }
-
-export function addedLines(d: UnifiedDiff): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  for (const f of d.files) {
-    out.set(f.path, f.hunks.flatMap((h) => h.lines.filter((l) => l.kind === '+').map((l) => l.text)));
-  }
-  return out;
-}

@@ -22,10 +22,6 @@ export function repoRoot(): string {
   return sh(['rev-parse', '--show-toplevel']).trim();
 }
 
-export function isRepo(): boolean {
-  return sh(['rev-parse', '--is-inside-work-tree'], true).trim() === 'true';
-}
-
 /** Pick a base ref to diff against: explicit flag, then the usual suspects. */
 export function defaultBase(): string | null {
   for (const ref of ['origin/main', 'origin/master', 'origin/develop', 'main', 'master', 'develop']) {
@@ -37,7 +33,10 @@ export function defaultBase(): string | null {
 export type DiffMode = 'staged' | 'worktree' | 'range' | 'commit';
 
 export function diffFor(mode: DiffMode, base?: string | null): { raw: string; label: string } {
-  const common = ['--no-color', '--no-ext-diff', '--unified=3'];
+  // Force a/ and b/ prefixes. Without them the parser cannot find the path: with
+  // `diff.mnemonicprefix = true` git emits `c/x w/x`, the a/…b/… match fails, and every
+  // finding is dropped as "file not in the diff" — silently, as "no findings".
+  const common = ['--no-color', '--no-ext-diff', '--unified=3', '--src-prefix=a/', '--dst-prefix=b/'];
   if (mode === 'staged') {
     return { raw: sh(['diff', '--staged', ...common], true), label: 'staged changes' };
   }
