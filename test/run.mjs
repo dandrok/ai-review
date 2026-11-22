@@ -150,13 +150,31 @@ test('gitignore: creates the secrets block once, then leaves it alone', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ai-review-gi-'));
   const first = ensureGitignore(dir);
   const text = readFileSync(join(dir, '.gitignore'), 'utf8');
-  for (const pattern of ['.env', '.env.*', '!.env.example', '*.pem', 'id_rsa*', '.ai-review/']) {
+  for (const pattern of ['.env', '.env.*', '!.env.example', '*.pem', 'id_rsa*', '.ai-review/last.json']) {
     assert.ok(text.split('\n').includes(pattern), `missing ${pattern}`);
   }
   assert.match(first[0], /created/);
   const second = ensureGitignore(dir);
   assert.match(second[0], /already covers/);
   assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), text);
+});
+
+test('gitignore: narrows a superseded .ai-review/ line so pack overrides survive', () => {
+  // 0.2.1 wrote `.ai-review/`, which also hid `.ai-review/packs/*.md` — the documented pack
+  // override could never be committed. Re-running init has to repair that, because the fix is
+  // only worth anything to repos that were already initialised.
+  const dir = mkdtempSync(join(tmpdir(), 'ai-review-gi-legacy-'));
+  writeFileSync(join(dir, '.gitignore'), 'node_modules/\n.ai-review/\n');
+  const notes = ensureGitignore(dir);
+  const lines = readFileSync(join(dir, '.gitignore'), 'utf8').split('\n');
+  assert.ok(!lines.includes('.ai-review/'), 'the whole-directory ignore must be dropped');
+  assert.ok(lines.includes('.ai-review/last.json'), 'the artifact must still be ignored');
+  assert.ok(lines.includes('node_modules/'), 'unrelated lines are kept');
+  assert.match(notes.join(' '), /narrowed/);
+
+  const text = readFileSync(join(dir, '.gitignore'), 'utf8');
+  assert.match(ensureGitignore(dir)[0], /already covers/);
+  assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), text, 'second run is a no-op');
 });
 test('env: one global key file serves every repo', () => {
   const home = mkdtempSync(join(tmpdir(), 'ai-review-home-'));
