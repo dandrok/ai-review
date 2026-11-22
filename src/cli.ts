@@ -3,7 +3,6 @@ import { initProject, installHooks, selfCommand } from './init.ts';
 import { loadEnv, describeEnvLoad } from './env.ts';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { DiffMode } from './git.ts';
 import type { Effort, FailOn } from './config.ts';
 
 declare const __AI_REVIEW_VERSION__: string;
