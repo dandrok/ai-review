@@ -111,9 +111,10 @@ export function ensureGitignore(root: string): string[] {
   // Ignoring the whole run directory also hid `.ai-review/packs/*.md`, so a documented pack
   // override could never be committed and CI never saw it. Narrow it on the way through.
   const kept = existing.split('\n').filter((l) => !SUPERSEDED_IGNORES.includes(l.trim()));
-  const base = kept.join('\n').replace(/\s+$/, '');
-  writeFileSync(path, `${base}${base ? '\n\n' : ''}${missing.join('\n')}\n`);
-  const notes = [`${existing ? 'updated' : 'created'} .gitignore (+${missing.filter((l) => !l.startsWith('#')).length} pattern(s))`];
+  const parts = [kept.join('\n').replace(/\s+$/, ''), missing.join('\n')].filter(Boolean);
+  writeFileSync(path, `${parts.join('\n\n')}\n`);
+  const added = missing.filter((l) => !l.startsWith('#')).length;
+  const notes = [`${existing ? 'updated' : 'created'} .gitignore${added ? ` (+${added} pattern(s))` : ''}`];
   if (superseded.length) notes.push(`narrowed ${superseded.join(', ')} to the run artifact, so pack overrides can be committed`);
   return notes;
 }

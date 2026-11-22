@@ -275,7 +275,7 @@ language: ""          # free-text stack hint for the prompt; "" = let the model 
 post: true
 ```
 
-Packs are Markdown files that *are* the system prompt: `packs/security.md`, `packs/correctness.md`, `packs/performance.md`, `packs/spec.md`. To add a house rule, drop `.ai-review/packs/house.md` in the target repo — it overrides the bundled pack of the same name. No code change, no rebuild. **Commit it**: `.gitignore` only excludes `.ai-review/last.json`, so a pack override travels with the repo and the CI run sees it too.
+Packs are Markdown files that *are* the system prompt: `packs/security.md`, `packs/correctness.md`, `packs/performance.md`, `packs/spec.md`. To add a house rule, drop `.ai-review/packs/house.md` in the target repo — it overrides the bundled pack of the same name. No code change, no rebuild. **Commit it**: `.gitignore` only excludes `.ai-review/last.json`, so a pack override travels with the repo and the CI run sees it too. Repos initialised by 0.2.1 or earlier still ignore the whole directory — re-run `ai-review init` once to narrow it.
 
 [↑ Contents](#contents)
 
