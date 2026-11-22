@@ -46,6 +46,14 @@ export DEEPSEEK_API_KEY=sk-...       # or add it to the repo's Actions secrets
 npx @dandrok/ai-review review        # review the current branch vs the base branch
 ```
 
+Every `npx @dandrok/ai-review …` below also works as a bare `ai-review …` once installed
+globally. Global is the better choice for daily use: one stable command, no download per run.
+
+```bash
+npm i -g @dandrok/ai-review
+ai-review review --worktree          # review your uncommitted work
+```
+
 ### B. No Node at all
 
 The tool is a bundle with zero runtime dependencies, so Docker is the whole story for
@@ -190,13 +198,28 @@ ai-review install-hooks [--pre-commit] [--pre-push]
 | `--mock <file>` | replay a JSON review, no network (used by the test suite) |
 | `--fail-on` | `never` \| `critical` \| `warning` \| `any` (default `critical`) |
 | `--effort` | `none` \| `low` \| `high` \| `max` (default `high`; `low` for pre-push) |
+| `--model <name>` | model id (default `deepseek-flash`) |
 | `--packs` | `security,correctness,performance,spec` (default: the first three) |
+| `--max-findings <n>` | cap after dedupe (default `8`, max `50`) |
 | `--format` | `terminal` \| `json` \| `markdown` |
+| `--quiet` / `-q` | suppress progress on stderr; findings still print |
+| `--pr-title` / `--pr-body` | override the PR text when `--post` runs outside Actions |
 | `--post` / `--no-post` | post as a GitHub PR review when CI env vars are present |
+
+`--worktree` is the one to use when reviewing your own work before committing: it includes
+staged **and** unstaged changes. `--staged` sees only what you added to the index, and the
+default mode (no flag) sees only **commits** — so uncommitted edits look like "nothing to
+review" there.
 
 Exit codes: `0` clean (or below `fail_on`), `1` blockers found, `2` tool error. A pre-push hook uses the exit code; CI can use it as the job result.
 
 Environment: `DEEPSEEK_API_KEY` (required), `AI_REVIEW_BASE_URL` (any OpenAI-compatible endpoint), `GITHUB_TOKEN` + `GITHUB_REPOSITORY` (auto-detected in Actions).
+
+**The hooks `init` writes need the network today.** They call
+`npx -y @dandrok/ai-review`, which resolves the `latest` version rather than the one you
+installed. Offline, npm fails and the pre-commit hook still fails closed — but it reports
+"found a credential" even when it never ran. Tracked as backlog #4; until then, `docker` or
+a direct `node dist/ai-review.mjs` invocation avoids it.
 
 ### Where the key lives
 
@@ -245,12 +268,14 @@ effort: high          # none | low | high | max
 fail_on: critical     # never | critical | warning | any
 max_findings: 8
 budget_chars: 60000
+max_output_tokens: 16000   # output budget; thinking tokens are spent from it too
 packs: [security, correctness, performance]
 ignore: ["**/*.md", "**/*.lock", "**/dist/**"]
+language: ""          # free-text stack hint for the prompt; "" = let the model infer
 post: true
 ```
 
-Packs are Markdown files that *are* the system prompt: `packs/security.md`, `packs/correctness.md`, `packs/performance.md`, `packs/spec.md`. To add a house rule, drop `.ai-review/packs/house.md` in the target repo — it overrides the bundled pack of the same name. No code change, no rebuild.
+Packs are Markdown files that *are* the system prompt: `packs/security.md`, `packs/correctness.md`, `packs/performance.md`, `packs/spec.md`. To add a house rule, drop `.ai-review/packs/house.md` in the target repo — it overrides the bundled pack of the same name. No code change, no rebuild. **Commit it**: `.gitignore` only excludes `.ai-review/last.json`, so a pack override travels with the repo and the CI run sees it too.
 
 [↑ Contents](#contents)
 
@@ -290,7 +315,7 @@ Nothing in the pipeline knows what language the target is written in:
 
 `language:` in the config is a one-line hint for the prompt (`The repository is written in Go`), not an input to any parser. A Go, Python or Rust repo gets the same pipeline; only the packs' examples read strangely.
 
-**Why TypeScript and not shell:** the tool has to parse unified diffs into line indices, validate model output, retry on invalid JSON, and assemble a GitHub review payload. In bash that is 800 lines of `jq` and `awk` with no types, and every edge case in diff parsing becomes a silent wrong-line comment. Node is present on any machine that would run this via `npx`, and the Docker lane covers the rest. It is written as one file with no dependencies, so `npx` has nothing to install and the target repo gains no supply-chain risk.
+**Why TypeScript and not shell:** the tool has to parse unified diffs into line indices, validate model output, retry on invalid JSON, and assemble a GitHub review payload. In bash that is a pile of `jq` and `awk` with no types, and every edge case in diff parsing becomes a silent wrong-line comment. Node is present on any machine that would run this via `npx`, and the Docker lane covers the rest. It is written as one file with no dependencies, so `npx` has nothing to install and the target repo gains no supply-chain risk.
 
 [↑ Contents](#contents)
 

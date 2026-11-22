@@ -150,7 +150,7 @@ test('gitignore: creates the secrets block once, then leaves it alone', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ai-review-gi-'));
   const first = ensureGitignore(dir);
   const text = readFileSync(join(dir, '.gitignore'), 'utf8');
-  for (const pattern of ['.env', '.env.*', '!.env.example', '*.pem', 'id_rsa*', '.ai-review/']) {
+  for (const pattern of ['.env', '.env.*', '!.env.example', '*.pem', 'id_rsa*', '.ai-review/last.json']) {
     assert.ok(text.split('\n').includes(pattern), `missing ${pattern}`);
   }
   assert.match(first[0], /created/);

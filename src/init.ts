@@ -87,7 +87,9 @@ const GITIGNORE_BLOCK = [
   'id_rsa*',
   'id_ed25519*',
   '# --- ai-review run artifacts ---',
-  '.ai-review/',
+  // Only the run artifact. Ignoring the whole directory made the documented
+  // `.ai-review/packs/<id>.md` override impossible to commit, so CI never saw it.
+  '.ai-review/last.json',
 ];
 
 /**
@@ -95,16 +97,25 @@ const GITIGNORE_BLOCK = [
  * A committed .env is permanent: it stays in history after deletion and must be rotated,
  * so it is worth one file write to keep the file out of git from the first commit.
  */
+
+/** Lines this tool wrote that a later version narrowed. Removed when the file is rewritten. */
+const SUPERSEDED_IGNORES = ['.ai-review/'];
+
 export function ensureGitignore(root: string): string[] {
   const path = join(root, '.gitignore');
   const existing = existsSync(path) ? readFileSync(path, 'utf8') : '';
   const have = new Set(existing.split('\n').map((l) => l.trim()));
   const missing = GITIGNORE_BLOCK.filter((l) => !have.has(l));
-  if (!missing.length) return ['.gitignore already covers secrets'];
-  const header = existing.endsWith('\n') || !existing ? '' : '\n';
-  const body = existing + header + (existing ? '\n' : '') + missing.join('\n') + '\n';
-  writeFileSync(path, body);
-  return [`${existing ? 'updated' : 'created'} .gitignore (+${missing.filter((l) => !l.startsWith('#')).length} pattern(s))`];
+  const superseded = SUPERSEDED_IGNORES.filter((l) => have.has(l));
+  if (!missing.length && !superseded.length) return ['.gitignore already covers secrets'];
+  // Ignoring the whole run directory also hid `.ai-review/packs/*.md`, so a documented pack
+  // override could never be committed and CI never saw it. Narrow it on the way through.
+  const kept = existing.split('\n').filter((l) => !SUPERSEDED_IGNORES.includes(l.trim()));
+  const base = kept.join('\n').replace(/\s+$/, '');
+  writeFileSync(path, `${base}${base ? '\n\n' : ''}${missing.join('\n')}\n`);
+  const notes = [`${existing ? 'updated' : 'created'} .gitignore (+${missing.filter((l) => !l.startsWith('#')).length} pattern(s))`];
+  if (superseded.length) notes.push(`narrowed ${superseded.join(', ')} to the run artifact, so pack overrides can be committed`);
+  return notes;
 }
 
 export function initProject(opts: { force: boolean; hooks: boolean; workflow: boolean }): string[] {
