@@ -18,7 +18,17 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: npm ci --ignore-scripts
       - run: npm run build
+      - name: dist/ is a build artifact, not a tracked file
+        run: |
+          if [ -n "$(git ls-files dist)" ]; then
+            echo "::error::dist/ must not be committed."
+            echo "Fix: git rm -r --cached dist"
+            exit 1
+          fi
       - run: npm run typecheck
       - run: npm test
       - name: the bundle has no runtime dependencies
-        run: test "$(node -e "console.log(Object.keys(require('./package.json').dependencies||{}).length)")" = "0"
+        run: |
+          pkg="require('./package.json')"
+          deps=$(node -p "Object.keys($pkg.dependencies||{}).length")
+          test "$deps" = "0"

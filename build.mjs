@@ -1,13 +1,16 @@
 import * as esbuild from 'esbuild';
-import { chmodSync, mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync } from 'node:fs';
 
 mkdirSync('dist', { recursive: true });
+const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 const shared = {
   bundle: true,
   platform: 'node',
   format: 'esm',
   target: 'node18',
   legalComments: 'none',
+  // package.json is the only place the version is written down.
+  define: { __AI_REVIEW_VERSION__: JSON.stringify(version) },
 };
 await esbuild.build({ ...shared, entryPoints: ['src/cli.ts'], outfile: 'dist/ai-review.mjs', banner: { js: '#!/usr/bin/env node' } });
 chmodSync('dist/ai-review.mjs', 0o755);

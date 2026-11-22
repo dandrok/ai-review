@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import type { DiffMode } from './git.ts';
 import type { Effort, FailOn } from './config.ts';
 
-const VERSION = '0.1.0';
+declare const __AI_REVIEW_VERSION__: string;
+
+const VERSION = __AI_REVIEW_VERSION__;
 
 const HELP = `ai-review ${VERSION} — diff-grounded AI code review, one cheap model.
 

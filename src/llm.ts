@@ -27,12 +27,22 @@ export interface LlmOptions {
   onRetry?: (note: string) => void;
 }
 
+/**
+ * USD per 1M tokens, `[off-peak, peak]`, copied by hand from DeepSeek's published rates:
+ * https://api-docs.deepseek.com/quick_start/pricing — that page wins over this table.
+ *
+ * Only used to print an estimate in the summary. It is a hardcoded copy of a price list, so it
+ * drifts silently; if the number in the footer ever matters, read it from the API, not from here.
+ */
 const PRICES = {
   'deepseek-flash': { hit: [0.003, 0.006], miss: [0.15, 0.3], out: [0.6, 1.2] },
   'deepseek-v4-pro': { hit: [0.022, 0.044], miss: [0.66, 1.32], out: [1.98, 3.96] },
 } as const;
 
-/** Peak = 01:00-04:00 and 06:00-10:00 UTC, Mon-Fri. Everything else is off-peak (half price). */
+/**
+ * Peak windows as this tool assumes them: 01:00-04:00 and 06:00-10:00 UTC, Mon-Fri, everything
+ * else at half price. Verify against the pricing page above before trusting a peak/off-peak split.
+ */
 export function isPeak(now = new Date()): boolean {
   const day = now.getUTCDay();
   if (day === 0 || day === 6) return false;

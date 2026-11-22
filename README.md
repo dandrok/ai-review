@@ -1,8 +1,13 @@
 # ai-review
 
+[![ci](https://github.com/dandrok/ai-review/actions/workflows/ci.yml/badge.svg)](https://github.com/dandrok/ai-review/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/%40dandrok%2Fai-review)](https://www.npmjs.com/package/@dandrok/ai-review)
+[![runtime dependencies](https://img.shields.io/badge/runtime_deps-0-brightgreen)](#design-decisions-worth-knowing)
+[![license](https://img.shields.io/npm/l/%40dandrok%2Fai-review)](LICENSE)
+
 Diff-grounded AI code review for **any** git repository. One model call, findings anchored to real diff lines, inline PR comments, and a verdict computed in code — not by the model.
 
-Not a CodeRabbit clone and not a platform. ~900 lines of TypeScript, zero runtime dependencies, no server, no database, no index of your repo.
+Not a CodeRabbit clone and not a platform. One bundled file, zero runtime dependencies, no server, no database, no index of your repo. The npm badge above is the only version this project keeps written down.
 
 ```
 PR or local diff ──► cheap deterministic pass ──► context bundle ──► deepseek-flash (JSON)
@@ -36,41 +41,49 @@ Three lanes, same CLI. Pick by what the target project already has.
 ### A. JS / TS project (or any machine with Node 18+)
 
 ```bash
-npx @dandrok/ai-review init          # writes .ai-review.yml, a GH workflow, and a pre-push hook
+npx @dandrok/ai-review init          # writes .ai-review.yml, a GH workflow, and both git hooks
 export DEEPSEEK_API_KEY=sk-...       # or add it to the repo's Actions secrets
 npx @dandrok/ai-review review        # review the current branch vs the base branch
 ```
 
-### B. Any language, via the `pre-commit` framework
+### B. No Node at all
 
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: https://github.com/dandrok/ai-review
-    rev: v0.1.0
-    hooks:
-      - id: ai-review           # secrets scan on staged lines, no network, <1s
-      - id: ai-review-deep      # full review before push
-```
-
-The design has nothing JavaScript-specific in it — see [Any language, any repo](#any-language-any-repo).
-
-### C. No Node at all
+The tool is a bundle with zero runtime dependencies, so Docker is the whole story for
+repos without Node:
 
 ```bash
 docker build -t ai-review .
 docker run --rm -v "$PWD:/repo" -w /repo -e DEEPSEEK_API_KEY ai-review review --worktree
 ```
 
-### GitHub Actions
+Hooks are plain shell, so a Node-less repo wires one up once. The free, offline half
+(secrets only, no model, no API key) is what belongs at commit time:
+
+```sh
+# .git/hooks/pre-commit
+#!/bin/sh
+exec docker run --rm -v "$PWD:/repo" -w /repo ai-review review --staged --static-only --quiet
+```
+
+Anything that can run a command can run this tool — the pipeline knows nothing about
+JavaScript. See [Any language, any repo](#any-language-any-repo).
+
+> **Why no `pre-commit` framework hook?** It was removed. `language: node` installs this
+> package with `npm`, and npm runs a package's `prepare` script in a bare clone with **no
+> dependencies installed**, so the build could never run. Supporting it would mean
+> committing the compiled `dist/` back into git. `ai-review init` writes the same two
+> hooks natively and needs nothing from the repo.
+
+### C. GitHub Actions
 
 `ai-review init` drops this into the repo; it needs no changes for a normal project:
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
   with: { fetch-depth: 0 }          # the base branch must exist for the diff
-- run: npx -y @dandrok/ai-review@latest review --base origin/${{ github.base_ref }} --post
+- run: npx -y @dandrok/ai-review@latest review --base "origin/$BASE_REF" --post
   env:
+    BASE_REF: ${{ github.base_ref }}   # never interpolate a ref into the script
     DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -126,41 +139,33 @@ Nothing here uses an AST, an embedding, or a language server. See [Any language,
 
 ## What the comments look like
 
-One review, one inline comment per finding, anchored on a line that exists in the diff:
+One review, one inline comment per finding, anchored on a line that exists in the diff.
+Inline comments are **flat** — nothing to expand, nothing to click, readable on arrival:
 
-Each finding is collapsed, so a review reads as a list before it reads as an essay:
-
-> <details>
-> <summary>🔴 <b>Missing tenant scope on export</b> — <code>src/export.ts:5</code></summary>
+> 🔴 **Missing tenant scope on export** — `src/export.ts:5`
+> _critical · security · security+correctness+performance_
 >
 > `where id = $1` has no `tenant_id` predicate, unlike `loadDoc` in `src/docs.ts`, so any authenticated user can export another tenant's document.
 >
 > **Fix:** Add `and tenant_id = $2` and pass the session tenant.
 >
-> **Paste into your agent:**
->
-> ```text
-> Fix this code review finding.
-> severity: critical
-> category: security
-> location: src/export.ts:5
-> problem: Missing tenant scope on export
-> why: `where id = $1` has no tenant_id predicate, unlike loadDoc in src/docs.ts …
-> suggested fix: Add `and tenant_id = $2` and pass the session tenant.
-> id: security-2-export.ts:5
-> ```
->
-> </details>
->
 > `<!-- ai-review:v1 {"v":1,"id":"security-2-export.ts:5","rule":"security","severity":"CRITICAL","file":"src/export.ts","line":5} -->`
 
-GitHub sanitises HTML in comments, so there is no way to ship a real `<button>` — but **every fenced code block gets a copy button in the top-right corner**, which is the same affordance with no JavaScript and no extension. The `text` fence is the finding restated as an instruction: paste it into Claude Code, Codex, Antigravity, anything, and it has the file, the line, the reason and the intended fix.
+The **summary review** is the essay: a severity table, then **one** `<details>` that holds every finding
+plus a single `text` fence restating the whole review as a batch instruction for an agent.
+One expand and one copy block per review, not one per finding — a review with eight findings
+should not be eight things to click.
 
-The `<!-- ai-review:v1 … -->` comment stays invisible and is the machine-readable door for a future `--fix` mode. `ai-review` itself never writes code.
+GitHub sanitises HTML in comments, so there is no way to ship a real `<button>` — but **every
+fenced code block gets a copy button in the top-right corner**, which is the same affordance with
+no JavaScript and no extension. Paste that fence into Claude Code, Codex, Antigravity, anything,
+and it has the file, the line, the reason and the intended fix for each finding.
 
-The summary comment carries a severity table, an **"Expand all"** wrapper over the same blocks (one click lists everything without scrolling a diff), the count of findings dropped as ungrounded, the token/cost line, and the note that a human still merges.
+The `<!-- ai-review:v1 … -->` comment stays invisible and is the machine-readable door for a
+future `--fix` mode. `ai-review` itself never writes code.
 
-The summary comment carries a severity table, the count of findings dropped as ungrounded, the token/cost line, and the note that a human still merges.
+The footer reports which packs ran, how many findings were dropped as ungrounded, the context and
+diff character counts, the estimated cost, and the note that a human still merges.
 
 [↑ Contents](#contents)
 
@@ -253,15 +258,22 @@ Packs are Markdown files that *are* the system prompt: `packs/security.md`, `pac
 
 ## Cost
 
-Measured on `deepseek-flash` (V4.1-Flash-1017) with an 18.4k-token prompt, 89% of it a cache hit:
+Rates are DeepSeek's, and DeepSeek's pricing page is the only source of truth:
+<https://api-docs.deepseek.com/quick_start/pricing>
 
-| | per review |
-|---|---|
-| input (16.4k cached + 2k fresh) | $0.0004 |
-| output (512 tokens) | $0.0003 |
-| **total** | **~$0.0007 off-peak, ~$0.0014 peak** |
+`src/llm.ts` keeps a small table so the summary can print an estimate. Treat that number as
+an estimate, not a bill: it is a hardcoded copy of a public price list, so it is wrong the
+moment DeepSeek changes one, and it knows nothing about discounts your account actually has.
 
-That is roughly **7¢ per 100 pull requests.** At this price the only thing worth optimising is ordering the prompt for the cache, which the tool already does.
+What actually determines cost is the shape of one review, not the number of files:
+
+- **one** prompt: the diff plus a context bundle capped by `budget_chars` (default 60k chars ≈ 15k tokens);
+- most of that prompt is a stable prefix — system prompt and repo map — which bills at the cached rate;
+- output is capped by `max_output_tokens` (default 16k) and in practice is a few hundred tokens of JSON.
+
+That is why prompt ordering is a cost decision and not an aesthetic one — see
+[Context strategy](#context-strategy). At current rates a review is comfortably under a cent,
+which is the reason the only thing worth optimising here is the cache-hit rate.
 
 [↑ Contents](#contents)
 

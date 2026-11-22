@@ -1,7 +1,14 @@
 # For projects without Node: docker run --rm -v "$PWD:/repo" -w /repo ...
+# dist/ is not committed, so the bundle is built here from source.
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json build.mjs ./
+COPY src ./src
+RUN npm ci --ignore-scripts && npm run build
+
 FROM node:20-alpine
 WORKDIR /app
-COPY dist ./dist
+COPY --from=build /app/dist ./dist
 COPY packs ./packs
 COPY templates ./templates
 COPY package.json ./

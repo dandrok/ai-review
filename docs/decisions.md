@@ -64,3 +64,26 @@ skill is a task — see backlog.
 **Why:** a secrets check that can silently no-op is worse than no check at all. An
 opinion about a loop being an N+1 cannot gate a merge. These two rules resolve the
 contradictory advice two review rounds gave about the same hook line — see backlog #4.
+
+## 8. No `pre-commit` framework hook. No committed `dist/`.
+
+`.pre-commit-hooks.yaml` was deleted and `dist/` is gitignored. The two decisions are
+joined at the hip, so reverse them together.
+
+**Why:** `language: node` installs this package with
+`npm install -g git+file://<clone>`, which runs the `prepare` script — in a bare clone.
+Measured, not assumed: at `prepare` time `node_modules` does not exist at all, so the
+esbuild build cannot run and the install fails. Making `prepare` install its own
+devDependencies first fails the same way. The only way to satisfy it is to commit the
+compiled `dist/` so npm has something to pack.
+
+**What replaced it:** `ai-review init` now writes both git hooks (it used to write only
+pre-push, leaving the free offline secrets scan unreachable), and Docker covers repos
+with no Node. Neither needs anything committed.
+
+**Cost accepted:** a repo that uses the `pre-commit` framework can no longer add this
+with one YAML block, and `language: node` no longer bootstraps Node for Node-less repos.
+A repo with no Node and no Docker has no install path.
+
+**Revisit if:** npm starts installing devDependencies before `prepare`, or the build is
+rewritten to need no build-time dependency.
