@@ -33,9 +33,6 @@ export interface RunOptions {
   maxFindings?: number;
   packs?: string[];
 }
-
-export const PACK_ORDER = ['security', 'correctness', 'performance', 'spec'];
-
 export function loadPacks(root: string, ids: string[]): { id: string; text: string }[] {
   const out: { id: string; text: string }[] = [];
   for (const id of ids) {

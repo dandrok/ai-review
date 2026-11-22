@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -208,4 +210,76 @@ test('output: inline comments are flat, the summary has one expand with one copy
   assert.match(prompt, /SKIPPED/);
   assert.match(prompt, /Findings \(2\)/);
   assert.match(payload.body, /Missing &lt;tenant&gt; scope 2/);
+});
+
+test('git: mnemonic prefixes and quoted paths cannot silently drop findings', () => {
+  // Both settings make git print a header the parser cannot read: `c/x w/x` from
+  // diff.mnemonicPrefix, and `"a/caf\303\251.txt"` from core.quotePath (true by default).
+  // Either one used to make every finding vanish as "not in the diff" — reported as a clean
+  // review with exit 0, which is the one failure mode this tool must never have.
+  const repo = mkdtempSync(join(tmpdir(), 'ai-review-git-'));
+  const git = (args) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  git(['init', '-q']);
+  git(['config', 'user.email', 't@example.test']);
+  git(['config', 'user.name', 'test']);
+  git(['config', 'diff.mnemonicPrefix', 'true']);
+  git(['config', 'core.quotePath', 'true']);
+  writeFileSync(join(repo, 'café.txt'), `const key = 'AKIA${'Z7XK2QM4N8P1RTUV'}';\n`);
+  git(['add', '.']);
+
+  const cli = fileURLToPath(new URL('../dist/ai-review.mjs', import.meta.url));
+  const r = spawnSync(
+    process.execPath,
+    [cli, 'review', '--staged', '--static-only', '--format', 'json', '--fail-on', 'never'],
+    { cwd: repo, encoding: 'utf8' },
+  );
+  const findings = JSON.parse(r.stdout).findings;
+  assert.equal(findings.length, 1, `expected the key to be reported; got ${r.stdout}${r.stderr}`);
+  assert.equal(findings[0].file, 'café.txt');
+});
+
+test('git: a failed diff is a tool error, not an empty review', () => {
+  // sh() used to return '' on any git error. '' parses to zero files, which run.ts reports as
+  // "nothing to review" with exit 0 — so a typo'd --base was a green run.
+  const repo = mkdtempSync(join(tmpdir(), 'ai-review-badbase-'));
+  const git = (args) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  git(['init', '-q']);
+  git(['config', 'user.email', 't@example.test']);
+  git(['config', 'user.name', 'test']);
+  writeFileSync(join(repo, 'a.txt'), 'x\n');
+  git(['add', '.']);
+  git(['commit', '-qm', 'init']);
+
+  const cli = fileURLToPath(new URL('../dist/ai-review.mjs', import.meta.url));
+  const r = spawnSync(
+    process.execPath,
+    [cli, 'review', '--base', 'no-such-ref', '--format', 'json'],
+    { cwd: repo, encoding: 'utf8' },
+  );
+  assert.equal(r.status, 2, `bad --base must exit 2; got ${r.status}: ${r.stderr}`);
+  assert.equal(r.stdout.trim(), '', 'must not print a review for a diff it could not read');
+});
+
+test('git: one unreadable header fails the run instead of losing one file', { skip: process.platform === 'win32' }, () => {
+  // git still quotes a filename containing a double quote, even with core.quotePath=false, so
+  // that header cannot be parsed. Checking only that *some* header matched let a clean file in
+  // the same diff mask it, and the quoted file's findings were lost. (Windows forbids `"` in
+  // filenames, hence the skip.)
+  const repo = mkdtempSync(join(tmpdir(), 'ai-review-badheader-'));
+  const git = (args) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  git(['init', '-q']);
+  git(['config', 'user.email', 't@example.test']);
+  git(['config', 'user.name', 'test']);
+  writeFileSync(join(repo, 'normal.txt'), 'y\n');
+  writeFileSync(join(repo, 'we"ird.txt'), 'z\n');
+  git(['add', '.']);
+
+  const cli = fileURLToPath(new URL('../dist/ai-review.mjs', import.meta.url));
+  const r = spawnSync(
+    process.execPath,
+    [cli, 'review', '--staged', '--static-only', '--format', 'json'],
+    { cwd: repo, encoding: 'utf8' },
+  );
+  assert.equal(r.status, 2, `unreadable header must exit 2; got ${r.status}`);
+  assert.match(r.stderr, /unreadable diff header/);
 });

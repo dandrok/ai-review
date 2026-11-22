@@ -6,6 +6,7 @@
     "lib": ["ES2022"],
     "types": ["node"],
     "strict": true,
+    "noUnusedLocals": true,
     "noUncheckedIndexedAccess": false,
     "skipLibCheck": true,
     "noEmit": true,
