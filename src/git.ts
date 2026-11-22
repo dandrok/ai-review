@@ -42,14 +42,23 @@ export type DiffMode = 'staged' | 'worktree' | 'range' | 'commit';
 const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '--unified=3', '--src-prefix=a/', '--dst-prefix=b/'];
 const NO_QUOTE = ['-c', 'core.quotePath=false'];
 
+function hasHead(): boolean {
+  return sh(['rev-parse', '--verify', '--quiet', 'HEAD'], true).trim() !== '';
+}
+
 function runDiff(args: string[], label: string): { raw: string; label: string } {
   // Errors must not become an empty diff: '' parses to zero files, which run.ts reports as
   // "nothing to review" with exit 0 — a fail-open gate. sh() throws unless told otherwise.
   const raw = sh([...NO_QUOTE, ...args]);
-  // Same class of failure, one layer up: if the header is not the shape the parser needs, every
-  // finding is dropped as ungrounded and the review claims there was nothing to report.
-  if (raw && !/^diff --git a\/.* b\//m.test(raw)) {
-    throw new Error(`unexpected diff header from git (${label}): ${raw.split('\n')[0].slice(0, 200)}`);
+  // Same class of failure, one layer up: a header the parser cannot read loses that file's
+  // findings, and the review then claims there was nothing to report. Every header counts —
+  // checking only that one line matched would let a single quoted path (a filename containing
+  // `"`) through whenever another file parsed cleanly.
+  const unreadable = raw
+    .split('\n')
+    .filter((l) => l.startsWith('diff --git ') && !/^diff --git a\/.* b\//.test(l));
+  if (unreadable.length) {
+    throw new Error(`unreadable diff header in ${label} (${unreadable.length}): ${unreadable[0].slice(0, 200)}`);
   }
   return { raw, label };
 }
@@ -59,6 +68,8 @@ export function diffFor(mode: DiffMode, base?: string | null): { raw: string; la
     return runDiff(['diff', '--staged', ...DIFF_FLAGS], 'staged changes');
   }
   if (mode === 'worktree') {
+    // `git diff HEAD` fails without a commit; nothing to review is not a tool error.
+    if (!hasHead()) return { raw: '', label: 'empty repository (no commits yet)' };
     return runDiff(['diff', 'HEAD', ...DIFF_FLAGS], 'uncommitted changes vs HEAD');
   }
   if (mode === 'commit') {
@@ -69,9 +80,7 @@ export function diffFor(mode: DiffMode, base?: string | null): { raw: string; la
   if (!from) {
     // No base ref. With no commits at all there is nothing to diff, and `git diff <tree> HEAD`
     // would fail on the missing HEAD — say so instead of surfacing a git error.
-    if (!sh(['rev-parse', '--verify', '--quiet', 'HEAD'], true).trim()) {
-      return { raw: '', label: 'empty repository (no commits yet)' };
-    }
+    if (!hasHead()) return { raw: '', label: 'empty repository (no commits yet)' };
     // First commit on a branch with no remote: diff the whole tree against nothing.
     return runDiff(['diff', EMPTY_TREE, 'HEAD', ...DIFF_FLAGS], 'full tree (no base ref found)');
   }
