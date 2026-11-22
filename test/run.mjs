@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -208,4 +210,30 @@ test('output: inline comments are flat, the summary has one expand with one copy
   assert.match(prompt, /SKIPPED/);
   assert.match(prompt, /Findings \(2\)/);
   assert.match(payload.body, /Missing &lt;tenant&gt; scope 2/);
+});
+
+test('git: mnemonic prefixes and quoted paths cannot silently drop findings', () => {
+  // Both settings make git print a header the parser cannot read: `c/x w/x` from
+  // diff.mnemonicPrefix, and `"a/caf\303\251.txt"` from core.quotePath (true by default).
+  // Either one used to make every finding vanish as "not in the diff" — reported as a clean
+  // review with exit 0, which is the one failure mode this tool must never have.
+  const repo = mkdtempSync(join(tmpdir(), 'ai-review-git-'));
+  const git = (args) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  git(['init', '-q']);
+  git(['config', 'user.email', 't@example.test']);
+  git(['config', 'user.name', 'test']);
+  git(['config', 'diff.mnemonicPrefix', 'true']);
+  git(['config', 'core.quotePath', 'true']);
+  writeFileSync(join(repo, 'café.txt'), `const key = 'AKIA${'Z7XK2QM4N8P1RTUV'}';\n`);
+  git(['add', '.']);
+
+  const cli = fileURLToPath(new URL('../dist/ai-review.mjs', import.meta.url));
+  const r = spawnSync(
+    process.execPath,
+    [cli, 'review', '--staged', '--static-only', '--format', 'json', '--fail-on', 'never'],
+    { cwd: repo, encoding: 'utf8' },
+  );
+  const findings = JSON.parse(r.stdout).findings;
+  assert.equal(findings.length, 1, `expected the key to be reported; got ${r.stdout}${r.stderr}`);
+  assert.equal(findings[0].file, 'café.txt');
 });

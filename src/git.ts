@@ -32,27 +32,50 @@ export function defaultBase(): string | null {
 
 export type DiffMode = 'staged' | 'worktree' | 'range' | 'commit';
 
+/**
+ * Flags every diff shares. The prefixes are forced because the parser needs `a/x b/x`: with
+ * `diff.mnemonicprefix` git emits `c/x w/x`, the header match fails, and every finding is
+ * dropped as "not in the diff" — silently, as "no findings". `core.quotePath` is disabled for
+ * the same reason: it C-quotes non-ASCII paths (`"a/caf\303\251.txt"`), which breaks the same
+ * extraction for any file with a non-ASCII name.
+ */
+const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '--unified=3', '--src-prefix=a/', '--dst-prefix=b/'];
+const NO_QUOTE = ['-c', 'core.quotePath=false'];
+
+function runDiff(args: string[], label: string): { raw: string; label: string } {
+  // Errors must not become an empty diff: '' parses to zero files, which run.ts reports as
+  // "nothing to review" with exit 0 — a fail-open gate. sh() throws unless told otherwise.
+  const raw = sh([...NO_QUOTE, ...args]);
+  // Same class of failure, one layer up: if the header is not the shape the parser needs, every
+  // finding is dropped as ungrounded and the review claims there was nothing to report.
+  if (raw && !/^diff --git a\/.* b\//m.test(raw)) {
+    throw new Error(`unexpected diff header from git (${label}): ${raw.split('\n')[0].slice(0, 200)}`);
+  }
+  return { raw, label };
+}
+
 export function diffFor(mode: DiffMode, base?: string | null): { raw: string; label: string } {
-  // Force a/ and b/ prefixes. Without them the parser cannot find the path: with
-  // `diff.mnemonicprefix = true` git emits `c/x w/x`, the a/…b/… match fails, and every
-  // finding is dropped as "file not in the diff" — silently, as "no findings".
-  const common = ['--no-color', '--no-ext-diff', '--unified=3', '--src-prefix=a/', '--dst-prefix=b/'];
   if (mode === 'staged') {
-    return { raw: sh(['diff', '--staged', ...common], true), label: 'staged changes' };
+    return runDiff(['diff', '--staged', ...DIFF_FLAGS], 'staged changes');
   }
   if (mode === 'worktree') {
-    return { raw: sh(['diff', 'HEAD', ...common], true), label: 'uncommitted changes vs HEAD' };
+    return runDiff(['diff', 'HEAD', ...DIFF_FLAGS], 'uncommitted changes vs HEAD');
   }
   if (mode === 'commit') {
     const ref = base || 'HEAD';
-    return { raw: sh(['show', '--format=', ...common, ref], true), label: `commit ${ref}` };
+    return runDiff(['show', '--format=', ...DIFF_FLAGS, ref], `commit ${ref}`);
   }
   const from = base || defaultBase();
   if (!from) {
+    // No base ref. With no commits at all there is nothing to diff, and `git diff <tree> HEAD`
+    // would fail on the missing HEAD — say so instead of surfacing a git error.
+    if (!sh(['rev-parse', '--verify', '--quiet', 'HEAD'], true).trim()) {
+      return { raw: '', label: 'empty repository (no commits yet)' };
+    }
     // First commit on a branch with no remote: diff the whole tree against nothing.
-    return { raw: sh(['diff', EMPTY_TREE, 'HEAD', ...common], true), label: 'full tree (no base ref found)' };
+    return runDiff(['diff', EMPTY_TREE, 'HEAD', ...DIFF_FLAGS], 'full tree (no base ref found)');
   }
-  return { raw: sh(['diff', `${from}...HEAD`, ...common], true), label: `range ${from}...HEAD` };
+  return runDiff(['diff', `${from}...HEAD`, ...DIFF_FLAGS], `range ${from}...HEAD`);
 }
 
 /** Current file contents on disk (what a pre-push hook would review). */
