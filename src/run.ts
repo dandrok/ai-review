@@ -139,6 +139,10 @@ export async function runReview(opts: RunOptions): Promise<{ exitCode: number }>
     onRetry: (note) => say(`ai-review: retry (${note})`),
   });
 
+  // A truncated call that produced no findings is not a clean review. Keep the fact so the
+  // posted text and the exit code can say so, instead of rendering "no findings".
+  const incomplete = result.review.findings.length === 0 && result.truncated;
+
   // Step 3 — grounding, then dedup, then the deterministic cap.
   const grounded = groundFindings([...staticHits, ...result.review.findings], diff);
   const RANK: Record<string, number> = { CRITICAL: 3, WARNING: 2, SUGGESTION: 1 };
@@ -160,6 +164,14 @@ export async function runReview(opts: RunOptions): Promise<{ exitCode: number }>
     gate: true,
     contextChars: ctx.chars,
     diffChars: numbered.length,
+    incomplete: incomplete
+      ? {
+          truncated: result.truncated,
+          firstFinishReason: result.firstFinishReason,
+          reasoningChars: result.reasoningChars,
+          maxOutputTokens: result.maxOutputTokens,
+        }
+      : null,
   });
 
   // Step 4 — persist + emit.
@@ -181,6 +193,13 @@ export async function runReview(opts: RunOptions): Promise<{ exitCode: number }>
         summary: result.review.summary,
         findings: merged,
         dropped: grounded.dropped.map((d) => ({ file: d.finding.file, line: d.finding.start_line, reason: d.reason })),
+        incomplete: incomplete
+          ? {
+              finish_reason: result.firstFinishReason,
+              reasoning_chars: result.reasoningChars,
+              max_output_tokens: result.maxOutputTokens,
+            }
+          : null,
       },
       null,
       2,
@@ -195,7 +214,22 @@ export async function runReview(opts: RunOptions): Promise<{ exitCode: number }>
   }
 
   if (opts.format === 'json') {
-    console.log(JSON.stringify({ summary: result.review.summary, findings: merged, cost_usd: result.cost_usd, usage: result.usage }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          summary: result.review.summary,
+          findings: merged,
+          incomplete,
+          truncated: result.truncated,
+          finish_reason: result.firstFinishReason,
+          max_output_tokens: result.maxOutputTokens,
+          cost_usd: result.cost_usd,
+          usage: result.usage,
+        },
+        null,
+        2,
+      ),
+    );
   } else if (opts.format === 'markdown') {
     console.log(payload.body);
   } else if (!opts.quiet || merged.length) {
@@ -203,6 +237,16 @@ export async function runReview(opts: RunOptions): Promise<{ exitCode: number }>
   }
 
   const blockers = countBlockers(merged, fileCfg.fail_on);
-  if (blockers > 0) say(`ai-review: ${blockers} finding(s) at or above '${fileCfg.fail_on}'`);
-  return { exitCode: blockers > 0 ? 1 : 0 };
+  if (incomplete) {
+    say(
+      `ai-review: INCOMPLETE — the model hit the output limit (${result.reasoningChars} reasoning chars, finish_reason=${result.firstFinishReason}, max_output_tokens=${result.maxOutputTokens}). This is not a clean review.`,
+    );
+  }
+  if (blockers > 0) {
+    say(`ai-review: ${blockers} finding(s) at or above '${fileCfg.fail_on}'`);
+    return { exitCode: 1 };
+  }
+  // An incomplete review did not complete, so it must never exit 0 (the documented contract is
+  // 0 clean, 1 blockers, 2 tool error).
+  return { exitCode: incomplete ? 2 : 0 };
 }

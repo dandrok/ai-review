@@ -211,7 +211,7 @@ staged **and** unstaged changes. `--staged` sees only what you added to the inde
 default mode (no flag) sees only **commits** — so uncommitted edits look like "nothing to
 review" there.
 
-Exit codes: `0` clean (or below `fail_on`), `1` blockers found, `2` tool error. A pre-push hook uses the exit code; CI can use it as the job result.
+Exit codes: `0` clean (or below `fail_on`), `1` blockers found, `2` tool error. A pre-push hook uses the exit code; CI can use it as the job result. An **incomplete** review — the model hit `max_output_tokens` and returned no findings — is a `2`, never `0`: it did not complete, so it must not pass as clean.
 
 Environment: `DEEPSEEK_API_KEY` (required), `AI_REVIEW_BASE_URL` (any OpenAI-compatible endpoint), `GITHUB_TOKEN` + `GITHUB_REPOSITORY` (auto-detected in Actions).
 
@@ -260,7 +260,7 @@ The key is never printed, logged, or written to `.ai-review/last.json`; the only
 
 ## Configuration
 
-`.ai-review.yml` in the repo root. Flat keys only — no YAML dependency, so no supply-chain surface.
+`.ai-review.yml` in the repo root. Flat keys only — no YAML dependency, so no supply-chain surface. Lists can be inline (`ignore: ["**/dist/**"]`) or a block list (`ignore:` then indented `- item` lines); both are equivalent. A shape this flat parser cannot express (for example a nested mapping) fails with an error naming the file and key rather than being silently dropped.
 
 ```yaml
 model: deepseek-flash
