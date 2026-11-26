@@ -1,9 +1,18 @@
 # Copy to .ai-review.yml (or run `npx @dandrok/ai-review init`). Flat keys only.
+# Lists may be inline (`[a, b]`) or a block list (`key:` then indented `- item` lines).
 model: deepseek-flash
 effort: high          # none | low | high | max — low is ~3x faster for pre-push
 fail_on: critical     # never | critical | warning | any
 max_findings: 8
 budget_chars: 60000
+max_output_tokens: 16000   # output budget; thinking tokens are spent from it too
 packs: [security, correctness, performance]
 ignore: ["**/*.md", "**/*.lock", "**/package-lock.json", "**/dist/**", "**/node_modules/**"]
+# The same list as a block, which is now equivalent:
+# ignore:
+#   - "**/*.md"
+#   - "**/*.lock"
+#   - "**/package-lock.json"
+#   - "**/dist/**"
+#   - "**/node_modules/**"
 post: true

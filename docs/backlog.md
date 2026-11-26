@@ -36,8 +36,7 @@ and one missing secret, and prints exactly what to do about the secret.
 ## 3. README drift
 
 **Status:** open.
-**Known:** `max_output_tokens` (config, default 16000) is implemented and documented
-nowhere. `core.hooksPath` behaviour is undocumented. `--static-only` does not write
+**Known:** `core.hooksPath` behaviour is undocumented. `--static-only` does not write
 `.ai-review/last.json` (only a full run does) and that is not stated.
 **Done:** every config key in `src/config.ts` appears in the README config block, and
 each CLI behaviour that writes or does not write an artifact is stated once.

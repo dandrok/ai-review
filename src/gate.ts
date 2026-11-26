@@ -117,6 +117,14 @@ export interface ReviewPayload {
   comments: { path: string; line: number; body: string }[];
 }
 
+/** Why a review could not be completed. Present only when the model produced no findings. */
+export interface IncompleteInfo {
+  truncated: boolean;
+  firstFinishReason: string;
+  reasoningChars: number;
+  maxOutputTokens: number;
+}
+
 export function toReviewPayload(opts: {
   findings: Finding[];
   droppedCount: number;
@@ -129,21 +137,42 @@ export function toReviewPayload(opts: {
   gate: boolean;
   contextChars: number;
   diffChars: number;
+  /** set when the model hit the output limit and returned no findings: never render "no findings". */
+  incomplete?: IncompleteInfo | null;
 }): ReviewPayload {
   const blockers = countBlockers(opts.findings, opts.failOn);
   const event: ReviewPayload['event'] = opts.gate && blockers > 0 ? 'REQUEST_CHANGES' : 'COMMENT';
+  const incomplete = opts.incomplete?.truncated ? opts.incomplete : null;
 
   const comments = opts.findings.flatMap((f) => {
     const line = anchorLine(f, opts.diff);
     return line === null ? [] : [{ path: f.file, line, body: commentBody(f, opts.agent) }];
   });
 
-  const header =
-    opts.findings.length === 0
-      ? '## 🤖 AI review — no findings'
-      : `## 🤖 AI review — ${blockers} blocker(s), ${opts.findings.length} finding(s)${
-          opts.gate && blockers ? ' · changes requested' : ''
-        }`;
+  let header: string;
+  if (opts.findings.length === 0) {
+    header = incomplete
+      ? '## ⚠️ AI review — incomplete (model hit the output limit)'
+      : '## 🤖 AI review — no findings';
+  } else {
+    const gateNote = opts.gate && blockers ? ' · changes requested' : '';
+    const incompleteNoteTag = incomplete ? ' · ⚠️ incomplete' : '';
+    header = `## 🤖 AI review — ${blockers} blocker(s), ${opts.findings.length} finding(s)${gateNote}${incompleteNoteTag}`;
+  }
+
+  const incompleteNote = incomplete
+    ? [
+        '### ⚠️ This review did not finish',
+        '',
+        'The model spent its output budget on reasoning and returned no review, so an empty result here does **not** mean the diff is clean.',
+        '',
+        `- \`finish_reason\`: \`${incomplete.firstFinishReason}\``,
+        `- reasoning emitted: ${incomplete.reasoningChars} chars`,
+        `- output budget (\`max_output_tokens\`): ${incomplete.maxOutputTokens}`,
+        '',
+        'Raise `max_output_tokens`, lower `effort`, or review a smaller diff to get a real review.',
+      ].join('\n')
+    : null;
 
   const table =
     opts.findings.length > 0
@@ -164,11 +193,12 @@ export function toReviewPayload(opts: {
           '```',
           '',
           '</details>',
+          ...(incompleteNote ? ['', incompleteNote] : []),
         ].join('\n')
-      : '_Nothing worth flagging on this diff._';
+      : incompleteNote ?? '_Nothing worth flagging on this diff._';
 
   const footer = [
-    `_${opts.model} · ${opts.findings.length} kept, ${opts.droppedCount} dropped as ungrounded · ${opts.contextChars} ctx + ${opts.diffChars} diff chars · $${opts.costUsd.toFixed(4)}_`,
+    `_${opts.model} · ${opts.findings.length} kept, ${opts.droppedCount} dropped as ungrounded · ${opts.contextChars} ctx + ${opts.diffChars} diff chars · $${opts.costUsd.toFixed(4)}${incomplete ? ' · incomplete' : ''}_`,
     '_Findings are grounded to diff lines; the verdict is computed from severities in code, not by the model. A human merges._',
   ].join('\n\n');
 
@@ -184,6 +214,16 @@ export function renderTerminal(payload: ReviewPayload, findings: Finding[], drop
   const lines: string[] = [];
   lines.push(payload.body.split('\n\n')[0]);
   lines.push('');
+  // With no findings the body is prose (a summary, or the "incomplete" explanation), not a
+  // table: print it verbatim so a truncated review never looks like a clean one.
+  if (!findings.length) {
+    const sections = payload.body.split('\n\n');
+    const middle = sections.slice(1, -1).join('\n\n').trim();
+    if (middle) {
+      lines.push(middle);
+      lines.push('');
+    }
+  }
   for (const f of findings) {
     const sev = f.severity === 'CRITICAL' ? paint('31;1', 'CRITICAL') : f.severity === 'WARNING' ? paint('33;1', 'WARNING') : paint('36', 'SUGGESTION');
     lines.push(`${ICON[f.severity]} ${sev} ${paint('1', f.title)}`);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,7 @@ import {
   dedupFindings, staticFindings, globToRegExp, estimateCost, loadDotEnv, ensureGitignore,
   toReviewPayload,
   loadDotEnvFiles, globalKeyFiles,
+  parseFlatYaml, loadConfig, ignored, callModel,
 } from '../dist/lib.mjs';
 
 const DIFF = `diff --git a/src/export.ts b/src/export.ts
@@ -300,4 +301,152 @@ test('git: one unreadable header fails the run instead of losing one file', { sk
   );
   assert.equal(r.status, 2, `unreadable header must exit 2; got ${r.status}`);
   assert.match(r.stderr, /unreadable diff header/);
+});
+
+// --- Defect 1: block-style YAML lists were silently discarded -------------------------------
+
+test('config: block-style lists behave like inline lists', () => {
+  const src = [
+    'model: deepseek-flash',
+    'effort: low',
+    'max_findings: 3',
+    'ignore:',
+    '  - "**/*.md"',
+    '  - "**/ignoreme.ts"',
+    '  # a comment between items is fine',
+    'packs:',
+    '  - security',
+    '  - correctness',
+  ].join('\n');
+  const parsed = parseFlatYaml(src);
+  assert.deepEqual(parsed.ignore, ['**/*.md', '**/ignoreme.ts']);
+  assert.deepEqual(parsed.packs, ['security', 'correctness']);
+  assert.equal(parsed.model, 'deepseek-flash');
+  assert.equal(parsed.effort, 'low');
+});
+
+test('config: an empty scalar followed by a sibling stays empty, not a list', () => {
+  const parsed = parseFlatYaml('language:\nmodel: deepseek-flash\n');
+  assert.equal(parsed.language, '');
+  assert.equal(parsed.model, 'deepseek-flash');
+});
+
+test('config: block-style ignore actually filters the diff', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ai-review-cfg-'));
+  writeFileSync(join(dir, '.ai-review.yml'), 'ignore:\n  - "**/ignoreme.ts"\n');
+  const { config } = loadConfig(dir);
+  assert.deepEqual(config.ignore, ['**/ignoreme.ts']);
+  assert.equal(ignored('ignoreme.ts', config.ignore), true);
+  assert.equal(ignored('keep.ts', config.ignore), false);
+});
+
+test('config: an unsupported shape fails loudly, naming the file and key', () => {
+  // A nested mapping used to collapse to '' and the user's patterns vanished without a word.
+  assert.throws(
+    () => parseFlatYaml('ignore:\n  paths:\n    - a\n', '.ai-review.yml'),
+    /\.ai-review\.yml:2:.*key "ignore".*nested mapping/,
+  );
+  // A list item with no key above it is always a mistake.
+  assert.throws(
+    () => parseFlatYaml('- "a"\n', '.ai-review.yml'),
+    /\.ai-review\.yml:1:.*list item.*no parent key/,
+  );
+});
+
+// --- Defect 2: a truncated call was reported as a clean review ------------------------------
+
+test('output: a truncated review renders incomplete, never "no findings"', () => {
+  const diff = parseDiff(DIFF);
+  const base = {
+    findings: [], droppedCount: 0, diff, agent: 'security', failOn: 'critical',
+    summary: 's', model: 'm', costUsd: 0, gate: true, contextChars: 0, diffChars: 0,
+  };
+  const clean = toReviewPayload(base);
+  assert.match(clean.body, /no findings/);
+
+  const trunc = toReviewPayload({
+    ...base,
+    incomplete: { truncated: true, firstFinishReason: 'length', reasoningChars: 59604, maxOutputTokens: 16000 },
+  });
+  assert.match(trunc.body, /incomplete \(model hit the output limit\)/);
+  assert.ok(!/no findings/.test(trunc.body), 'a truncated review must never read as clean');
+  assert.match(trunc.body, /finish_reason.*length/);
+  assert.match(trunc.body, /59604/);
+  assert.match(trunc.body, /16000/);
+});
+
+test('llm: truncation metadata is carried out of callModel', async () => {
+  const realFetch = globalThis.fetch;
+  let n = 0;
+  globalThis.fetch = async () => {
+    n++;
+    const payload =
+      n === 1
+        ? { choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: 'x'.repeat(42) } }], usage: { prompt_tokens: 1, completion_tokens: 16000 } }
+        : { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ summary: 's', verdict: 'approve', findings: [] }) } }], usage: { prompt_tokens: 1, completion_tokens: 2 } };
+    return { ok: true, json: async () => payload };
+  };
+  try {
+    const r = await callModel([{ role: 'user', content: 'x' }], {
+      apiKey: 'k', model: 'deepseek-flash', baseUrl: 'http://127.0.0.1:9', effort: 'high', maxTokens: 16000,
+    });
+    assert.equal(r.truncated, true);
+    assert.equal(r.firstFinishReason, 'length');
+    assert.equal(r.reasoningChars, 42);
+    assert.equal(r.maxOutputTokens, 16000);
+    assert.equal(r.attempts, 2);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('llm: truncated-then-empty review is incomplete and exits 2, never 0', async () => {
+  const { createServer } = await import('node:http');
+  const server = createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      const thinking = JSON.parse(body || '{}').thinking?.type;
+      const payload =
+        thinking === 'enabled'
+          ? { choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: 'r'.repeat(500) } }], usage: { prompt_tokens: 10, completion_tokens: 16000 } }
+          : { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ summary: 's', verdict: 'approve', findings: [] }) } }], usage: { prompt_tokens: 10, completion_tokens: 20 } };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(payload));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+
+  const repo = mkdtempSync(join(tmpdir(), 'ai-review-trunc-'));
+  const git = (args) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  git(['init', '-q']);
+  git(['config', 'user.email', 't@example.test']);
+  git(['config', 'user.name', 'test']);
+  writeFileSync(join(repo, 'db.ts'), 'const q = 1;\n');
+  git(['add', '.']);
+  writeFileSync(join(repo, '.ai-review.yml'), 'model: deepseek-flash\n');
+
+  const cli = fileURLToPath(new URL('../dist/ai-review.mjs', import.meta.url));
+  // spawn, not spawnSync: the fake server lives on this thread and must be able to answer.
+  const child = spawn(process.execPath, [cli, 'review', '--staged', '--format', 'markdown'], {
+    cwd: repo,
+    env: {
+      ...process.env,
+      DEEPSEEK_API_KEY: 'dummy',
+      AI_REVIEW_BASE_URL: `http://127.0.0.1:${port}`,
+      AI_REVIEW_POST: 'false',
+    },
+  });
+  let out = '';
+  let err = '';
+  child.stdout.on('data', (d) => (out += d));
+  child.stderr.on('data', (d) => (err += d));
+  const status = await new Promise((resolve) => child.on('close', resolve));
+  server.close();
+
+  assert.equal(status, 2, `an incomplete review must exit 2; got ${status}: ${err}`);
+  assert.match(out, /incomplete/i);
+  assert.ok(!/no findings/.test(out), `must not read as clean:\n${out}`);
+  assert.match(out, /finish_reason/);
 });

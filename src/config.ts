@@ -37,20 +37,90 @@ export const DEFAULTS: Config = {
 
 export const CANDIDATES = ['.ai-review.yml', '.ai-review.yaml', 'ai-review.yml'];
 
-/** Flat key/value YAML only (`key: value`, `key: [a, b]`). Enough for this config, no parser dependency. */
-export function parseFlatYaml(src: string): Record<string, string | string[]> {
+const indentOf = (s: string) => s.length - s.trimStart().length;
+const unquote = (s: string) => s.replace(/^["']|["']$/g, '');
+const stripComment = (s: string) => s.replace(/\s+#.*$/, '').trim();
+const splitInlineList = (v: string) =>
+  v.slice(1, -1).split(',').map((s) => unquote(s.trim())).filter(Boolean);
+
+/** `source:line: detail`, or `source: detail` when the line is unknown. */
+function configError(source: string, line: number | null, detail: string): Error {
+  return new Error(`${line === null ? source : `${source}:${line}`}: ${detail}`);
+}
+
+/**
+ * Read the indented `- item` lines that follow an empty `key:` at `keyIndent`.
+ * Returns the items and the index of the first line outside the list. A nested mapping or an
+ * empty item is a shape this parser cannot express, so it throws rather than dropping it.
+ */
+function readBlockList(
+  lines: string[],
+  start: number,
+  keyIndent: number,
+  key: string,
+  source: string,
+): { items: string[]; next: number } {
+  const items: string[] = [];
+  let j = start;
+  for (; j < lines.length; j++) {
+    const nextRaw = lines[j];
+    const next = stripComment(nextRaw);
+    if (!next || next.startsWith('#')) continue;
+    if (indentOf(nextRaw) <= keyIndent) break;
+    if (next !== '-' && !next.startsWith('- ')) {
+      throw configError(
+        source,
+        j + 1,
+        `key "${key}" has an indented nested mapping, which this flat parser cannot express; use "${key}: [a, b]" or an indented "- item" block list`,
+      );
+    }
+    const item = unquote(next.slice(1).trim());
+    if (!item) throw configError(source, j + 1, `key "${key}" has an empty list item`);
+    items.push(item);
+  }
+  return { items, next: j };
+}
+
+/**
+ * Flat key/value YAML (`key: value`, `key: [a, b]`, or a `key:` followed by an indented
+ * `- item` block list). Enough for this config, so there is no parser dependency.
+ *
+ * Anything this parser cannot express throws instead of being silently dropped: a user who
+ * writes a shape we do not support must see an error, not a config that quietly lost half
+ * its keys.
+ */
+export function parseFlatYaml(src: string, source = '<config>'): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
-  for (const rawLine of src.split('\n')) {
-    const line = rawLine.replace(/\s+#.*$/, '').trim();
+  const lines = src.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const line = stripComment(rawLine);
     if (!line || line.startsWith('#')) continue;
+
+    // A `- item` with no key above it is always a mistake.
+    if (line === '-' || line.startsWith('- ')) {
+      throw configError(source, i + 1, `list item "${line}" has no parent key`);
+    }
+
     const m = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(line);
     if (!m) continue;
-    const [, key, value] = m;
-    const v = value.trim();
-    if (v.startsWith('[') && v.endsWith(']')) {
-      out[key] = v.slice(1, -1).split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+    const [, key, rawValue] = m;
+    const value = rawValue.trim();
+
+    if (value.startsWith('[') && value.endsWith(']')) {
+      out[key] = splitInlineList(value);
+    } else if (value !== '') {
+      out[key] = unquote(value);
     } else {
-      out[key] = v.replace(/^["']|["']$/g, '');
+      // Empty value: a block sequence may follow at a deeper indent. A sibling at the same
+      // indent ends the list and leaves the key genuinely empty.
+      const { items, next } = readBlockList(lines, i + 1, indentOf(rawLine), key, source);
+      if (items.length) {
+        out[key] = items;
+        i = next - 1;
+      } else {
+        out[key] = '';
+      }
     }
   }
   return out;
@@ -62,7 +132,7 @@ export function loadConfig(root: string, overrides: Partial<Config> = {}): { con
   for (const name of CANDIDATES) {
     const p = join(root, name);
     if (existsSync(p)) {
-      parsed = parseFlatYaml(readFileSync(p, 'utf8'));
+      parsed = parseFlatYaml(readFileSync(p, 'utf8'), name);
       source = name;
       break;
     }

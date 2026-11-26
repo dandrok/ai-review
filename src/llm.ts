@@ -15,6 +15,14 @@ export interface CallResult {
   cost_usd: number;
   attempts: number;
   model: string;
+  /** true when any attempt ended with `finish_reason=length`: the output budget ran out. */
+  truncated: boolean;
+  /** finish_reason of the first response we got back, for diagnostics. */
+  firstFinishReason: string;
+  /** most reasoning chars seen, across attempts (reasoning is charged to the output budget). */
+  reasoningChars: number;
+  /** the `max_tokens` we actually sent. */
+  maxOutputTokens: number;
 }
 
 export interface LlmOptions {
@@ -101,7 +109,17 @@ export async function callModel(messages: { role: 'system' | 'user' | 'assistant
     const review = JSON.parse(readFileSync(opts.mockPath, 'utf8'));
     const v = validateReview(review);
     if (!v.review) throw new Error(`mock file is not a valid review: ${v.errors.join('; ')}`);
-    return { review: v.review, usage: { prompt_tokens: 0, completion_tokens: 0, cache_hit_tokens: 0, cache_miss_tokens: 0 }, cost_usd: 0, attempts: 0, model: 'mock' };
+    return {
+      review: v.review,
+      usage: { prompt_tokens: 0, completion_tokens: 0, cache_hit_tokens: 0, cache_miss_tokens: 0 },
+      cost_usd: 0,
+      attempts: 0,
+      model: 'mock',
+      truncated: false,
+      firstFinishReason: 'mock',
+      reasoningChars: 0,
+      maxOutputTokens: opts.maxTokens,
+    };
   }
 
   const extra: { role: string; content: string }[] = [];
@@ -110,6 +128,9 @@ export async function callModel(messages: { role: 'system' | 'user' | 'assistant
   // returns empty content, so a retry with the same settings is useless — turn
   // thinking off after the first failure and keep the answer.
   let effort: Effort = opts.effort;
+  let truncated = false;
+  let firstFinishReason: string | null = null;
+  let reasoningChars = 0;
   for (let attempt = 1; attempt <= 3; attempt++) {
     let json: any;
     try {
@@ -126,8 +147,11 @@ export async function callModel(messages: { role: 'system' | 'user' | 'assistant
     const content: string = json?.choices?.[0]?.message?.content ?? '';
     const usage = readUsage(json);
     const finish = String(json?.choices?.[0]?.finish_reason ?? 'unknown');
+    if (firstFinishReason === null) firstFinishReason = finish;
+    if (finish === 'length') truncated = true;
     if (!content.trim()) {
       const reasoning = String(json?.choices?.[0]?.message?.reasoning_content ?? '').length;
+      if (reasoning > reasoningChars) reasoningChars = reasoning;
       lastErrors = [`empty response (finish_reason=${finish}, reasoning=${reasoning} chars, completion_tokens=${usage.completion_tokens})`];
       extra.length = 0;
       extra.push({ role: 'user', content: 'Your reply was empty. Reply with the JSON object only, no prose and no markdown fence.' });
@@ -160,7 +184,17 @@ export async function callModel(messages: { role: 'system' | 'user' | 'assistant
       continue;
     }
     const review = v.review;
-    return { review, usage, cost_usd: estimateCost(opts.model, usage), attempts: attempt, model: opts.model };
+    return {
+      review,
+      usage,
+      cost_usd: estimateCost(opts.model, usage),
+      attempts: attempt,
+      model: opts.model,
+      truncated,
+      firstFinishReason: firstFinishReason ?? 'unknown',
+      reasoningChars,
+      maxOutputTokens: opts.maxTokens,
+    };
   }
   throw new Error(`model did not return a valid review after 3 attempts: ${lastErrors.join('; ')}`);
 }
